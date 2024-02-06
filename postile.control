@@ -1,0 +1,5 @@
+comment = 'postile:  Created by pgrx'
+default_version = '@CARGO_VERSION@'
+module_pathname = '$libdir/postile'
+relocatable = false
+superuser = true
