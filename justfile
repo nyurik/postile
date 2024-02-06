@@ -53,7 +53,7 @@ test-doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
 # Run all tests
-test-all:
+test-all: cargo-pgrx
     rustc --version
     cargo --version
     cargo fmt --all -- --check
