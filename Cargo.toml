@@ -24,7 +24,7 @@ pg16 = ["pgrx/pg16", "pgrx-tests/pg16" ]
 pg_test = []
 
 [dependencies]
-brotli = "3"
+brotli = "5"
 flate2 = "1"
 pgrx = "=0.11.3"
 
