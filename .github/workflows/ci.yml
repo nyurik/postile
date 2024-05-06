@@ -26,6 +26,7 @@ jobs:
         if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
       # Must match the version in Cargo.toml
       - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
+      - run: cargo pgrx init
       - run: just test-all
 
   msrv:
@@ -48,6 +49,7 @@ jobs:
           components: clippy,rustfmt
       # Must match the version in Cargo.toml
       - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
+      - run: cargo pgrx init
       - run: just test-all
 
 #  build:
