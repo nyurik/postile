@@ -15,23 +15,23 @@ crate-type = ["cdylib"]
 
 [features]
 default = ["pg13"]
-pg11 = ["pgrx/pg11", "pgrx-tests/pg11" ]
-pg12 = ["pgrx/pg12", "pgrx-tests/pg12" ]
-pg13 = ["pgrx/pg13", "pgrx-tests/pg13" ]
-pg14 = ["pgrx/pg14", "pgrx-tests/pg14" ]
-pg15 = ["pgrx/pg15", "pgrx-tests/pg15" ]
-pg16 = ["pgrx/pg16", "pgrx-tests/pg16" ]
+pg11 = ["pgrx/pg11", "pgrx-tests/pg11"]
+pg12 = ["pgrx/pg12", "pgrx-tests/pg12"]
+pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
+pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
+pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
+pg16 = ["pgrx/pg16", "pgrx-tests/pg16"]
 pg_test = []
 
 [dependencies]
-brotli = "5"
+brotli = "6"
 flate2 = "1"
-pgrx = "=0.11.3"
+pgrx = "=0.11.4"
 
 
 [dev-dependencies]
 cargo-husky = { version = "1", features = ["user-hooks"], default-features = false }
-pgrx-tests = "=0.11.3"
+pgrx-tests = "=0.11.4"
 
 [profile.dev]
 panic = "unwind"
