@@ -29,6 +29,24 @@ jobs:
       - run: cargo pgrx init
       - run: just test-all
 
+  test2:
+    name: Test2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+      # fmt test can be done before installing pgrx
+      - run: cargo fmt --all -- --check
+      # Must match the version in Cargo.toml
+      - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
+      - run: cargo pgrx init
+      - run: RUSTFLAGS='-D warnings' cargo build --workspace --all-targets --bins --tests --lib --benches --examples
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+      - run: cargo clippy -- -D warnings
+      - run: cargo clippy --workspace --all-targets --bins --tests --lib --benches --examples -- -D warnings
+      - run: cargo pgrx test
+
   msrv:
     name: Test MSRV
     runs-on: ubuntu-latest
