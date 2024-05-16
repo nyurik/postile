@@ -4,11 +4,6 @@ pg_module_magic!();
 
 mod compression;
 
-#[pg_extern]
-fn hello(data: &[u8]) -> Vec<u8> {
-    data.to_vec()
-}
-
 #[pg_extern(immutable, parallel_safe)]
 fn pt_gzip(data: Option<&[u8]>, level: default!(Option<i32>, "NULL")) -> Option<Vec<u8>> {
     // Need to take and return `Option` to handle NULL input in the second param
@@ -27,12 +22,6 @@ mod tests {
     use super::*;
     use pgrx::prelude::*;
     use std::fmt::Write as _;
-
-    #[pg_test]
-    fn hello_test() {
-        let result = Spi::get_one::<&[u8]>("SELECT hello('hi there');");
-        assert_eq!(result, Ok(Some(b"hi there".as_slice())));
-    }
 
     fn gzip_test(data: Option<&str>, level: Option<i32>) {
         let mut query = "SELECT pt_gzip(".to_string();
