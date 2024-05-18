@@ -10,4 +10,4 @@ echo "The following steps are also ran during   git push   command."
 echo "If you want to push your changes without running CI, use   git push --no-verify"
 echo "-------------------------------------------------------------------------------"
 
-just test-all
+just pre-push

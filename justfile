@@ -23,12 +23,13 @@ package: cargo-pgrx
 connect: cargo-pgrx
     cargo pgrx connect
 
-# Run cargo fmt and cargo clippy
-lint: fmt clippy
-
 # Run cargo fmt
 fmt:
     cargo +nightly fmt -- --config imports_granularity=Module,group_imports=StdExternalCrate
+
+# Test code formatting
+test-fmt:
+    cargo fmt --all -- --check
 
 # Run cargo clippy
 clippy:
@@ -44,6 +45,10 @@ bench:
     cargo bench
     open target/criterion/report/index.html
 
+# Quick compile
+check:
+    RUSTFLAGS='-D warnings' cargo check
+
 # Run tests
 test: cargo-pgrx
     cargo pgrx test
@@ -52,18 +57,20 @@ test: cargo-pgrx
 test-doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 
-# Run all tests
-test-all: cargo-pgrx
+# Rint rustc and cargo versions
+rust-info:
     rustc --version
     cargo --version
-    cargo fmt --all -- --check
-    RUSTFLAGS='-D warnings' {{ just_executable() }} build
-    @echo "### TEST #######################################################################################################################"
-    {{ just_executable() }} test
-    @echo "### DOCS #######################################################################################################################"
-    {{ just_executable() }} test-doc
-    @echo "### CLIPPY #####################################################################################################################"
-    {{ just_executable() }} clippy
+
+# Run all tests as expected by CI
+ci-test: rust-info test-fmt check test test-doc clippy
+
+# Run minimal subset of tests to ensure compatibility with MSRV
+ci-test-msrv: rust-info check test
+
+# Run some checks before pushing to remote GIT
+[private]
+pre-push: rust-info test-fmt clippy
 
 # Check if cargo-pgrx is installed, and install it if needed
 [private]
@@ -76,10 +83,10 @@ cargo-install $COMMAND $INSTALL_CMD="" *ARGS="":
     set -eu
     if ! command -v $COMMAND > /dev/null; then
         if ! command -v cargo-binstall > /dev/null; then
-            echo "$COMMAND could not be found. Installing it with    cargo install ${INSTALL_CMD:-$COMMAND} {{ ARGS }}"
-            cargo install ${INSTALL_CMD:-$COMMAND} {{ ARGS }}
+            echo "$COMMAND could not be found. Installing it with    cargo install ${INSTALL_CMD:-$COMMAND} {{ARGS}}"
+            cargo install ${INSTALL_CMD:-$COMMAND} {{ARGS}}
         else
-            echo "$COMMAND could not be found. Installing it with    cargo binstall ${INSTALL_CMD:-$COMMAND} {{ ARGS }}"
-            cargo binstall ${INSTALL_CMD:-$COMMAND} {{ ARGS }}
+            echo "$COMMAND could not be found. Installing it with    cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}"
+            cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}
         fi
     fi
