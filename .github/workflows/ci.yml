@@ -27,7 +27,7 @@ jobs:
       # Must match the version in Cargo.toml
       - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
       - run: cargo pgrx init
-      - run: just test-all
+      - run: just ci-test
 
   msrv:
     name: Test MSRV
@@ -50,7 +50,7 @@ jobs:
       # Must match the version in Cargo.toml
       - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
       - run: cargo pgrx init
-      - run: just test-all
+      - run: just ci-test-msrv
 
 #  build:
 #    name: Build ${{ matrix.target }}
