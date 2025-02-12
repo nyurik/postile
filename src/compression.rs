@@ -1,5 +1,6 @@
-use flate2::Compression;
 use std::io::Write as _;
+
+use flate2::Compression;
 
 const MIN_GZIP_LEVEL: Compression = Compression::none();
 const MAX_GZIP_LEVEL: Compression = Compression::best();
@@ -40,9 +41,11 @@ pub fn pt_brotli(data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use flate2::read::GzDecoder;
     use std::io::Read as _;
+
+    use flate2::read::GzDecoder;
+
+    use super::*;
 
     fn round_trip_gzip(data: &[u8]) {
         let encoded = pt_gzip(data, None).unwrap();

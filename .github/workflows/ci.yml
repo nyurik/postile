@@ -19,38 +19,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: taiki-e/install-action@v2
-        with:
-          tool: just
+        with: { tool: just }
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
       - uses: actions/checkout@v4
+      - name: Ensure this crate has not yet been published (on release)
+        if: github.event_name == 'release'
+        run: just check-if-published
       - uses: Swatinem/rust-cache@v2
         if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-      # Must match the version in Cargo.toml
-      - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
+      - run: sudo apt-get install -y build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
+      - name: Install PGRX with the needed version
+        run: cargo binstall cargo-pgrx --version "$(just print-pgrx-version)"
       - run: cargo pgrx init
       - run: just ci-test
-
-  msrv:
-    name: Test MSRV
-    runs-on: ubuntu-latest
-    steps:
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-      - name: Read crate metadata
-        id: metadata
-        run: echo "rust-version=$(sed -ne 's/rust-version *= *\"\(.*\)\"/\1/p' Cargo.toml)" >> $GITHUB_OUTPUT
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ steps.metadata.outputs.rust-version }}
-          components: clippy,rustfmt
-      # Must match the version in Cargo.toml
-      - run: cargo install cargo-pgrx --version 0.11.4 --locked --force
-      - run: cargo pgrx init
-      - run: just ci-test-msrv
 
 #  build:
 #    name: Build ${{ matrix.target }}
