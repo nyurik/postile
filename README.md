@@ -19,10 +19,10 @@ SELECT pt_brotli('Hello, world!');
 ```
 
 ## Development
-* This project is easier to develop with [just](https://github.com/casey/just#readme), a modern alternative to `make`. Install it with `cargo install just`.
+* This project is easier to develop with [just](https://github.com/casey/just#readme), a modern alternative to `make`.
+  Install it with `cargo install just`.
 * To get a list of available commands, run `just`.
 * To run tests, use `just test`.
-* On `git push`, it will run a few validations, including `cargo fmt`, `cargo clippy`, and `cargo test`.  Use `git push --no-verify` to skip these checks.
 
 ## License
 

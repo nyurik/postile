@@ -1,8 +1,9 @@
 // See https://github.com/pgcentralfoundation/pgrx/pull/1740
 #![allow(clippy::used_underscore_binding)]
 
-use crate::compression;
 use pgrx::{default, pg_extern};
+
+use crate::compression;
 
 #[pg_extern(immutable, parallel_safe)]
 fn pt_gzip(data: Option<&[u8]>, level: default!(Option<i32>, "NULL")) -> Option<Vec<u8>> {
@@ -19,9 +20,11 @@ fn pt_brotli(data: &[u8]) -> Vec<u8> {
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
 mod tests {
-    use super::*;
-    use pgrx::prelude::*;
     use std::fmt::Write as _;
+
+    use pgrx::prelude::*;
+
+    use super::*;
 
     fn gzip_test(data: Option<&str>, level: Option<i32>) {
         let mut query = "SELECT pt_gzip(".to_string();
