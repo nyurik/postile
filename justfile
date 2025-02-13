@@ -100,3 +100,15 @@ check-if-published:
     else
         echo "The current crate version has not yet been published."
     fi
+
+# Print current PGRX version
+@print-pgrx-version: (assert "jq")
+    cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
+
+# Ensure that a certain command is available
+[private]
+assert $COMMAND:
+    @if ! type "{{COMMAND}}" > /dev/null; then \
+        echo "Command '{{COMMAND}}' could not be found. Please make sure it has been installed on your computer." ;\
+        exit 1 ;\
+    fi
