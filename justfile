@@ -12,10 +12,6 @@ update:
     cargo +nightly -Z unstable-options update --breaking
     cargo update
 
-# Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
-msrv:
-    cargo msrv find --write-msrv
-
 # (Re-)initializing PGRX with all available PostgreSQL versions
 init: cargo-pgrx
     cargo pgrx init
@@ -69,9 +65,6 @@ rust-info:
 
 # Run all tests as expected by CI
 ci-test: rust-info test-fmt clippy check test test-doc
-
-# Run minimal subset of tests to ensure compatibility with MSRV
-ci-test-msrv: rust-info check test
 
 # Check if cargo-pgrx is installed, and install it if needed
 [private]

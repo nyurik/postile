@@ -8,8 +8,6 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["postgres", "tiles", "postgresql", "tile"]
 categories = ["database", "science::geo"]
-# MSRV must pass for both `cargo-pgrx` build and this crate's build
-rust-version = "1.74.1"
 
 [lib]
 crate-type = ["cdylib", "lib"]
