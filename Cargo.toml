@@ -4,10 +4,11 @@ version = "0.0.1"
 description = "PostgreSQL extension to generate map tiles"
 authors = ["Yuri Astrakhan <YuriAstrakhan@gmail.com>"]
 repository = "https://github.com/nyurik/postile"
-edition = "2021"
+edition = "2024"
 license = "MIT OR Apache-2.0"
 keywords = ["postgres", "tiles", "postgresql", "tile"]
 categories = ["database", "science::geo"]
+rust-version = "1.85"
 
 [lib]
 crate-type = ["cdylib", "lib"]
@@ -17,7 +18,7 @@ name = "pgrx_embed_postile"
 path = "./src/bin/pgrx_embed.rs"
 
 [features]
-default = ["pg13"]
+default = ["pg17"]
 pg12 = ["pgrx/pg12", "pgrx-tests/pg12" ]
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13" ]
 pg14 = ["pgrx/pg14", "pgrx-tests/pg14" ]
