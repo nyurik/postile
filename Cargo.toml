@@ -35,7 +35,7 @@ pgrx = "=0.12.9"
 
 [dev-dependencies]
 # This must match the version of `pgrx` in `dependencies` and .github/workflows/ci.yml
-pgrx-tests = "=0.12.9"
+pgrx-tests = "=0.13.0"
 
 [profile.dev]
 panic = "unwind"
