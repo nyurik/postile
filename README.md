@@ -2,6 +2,7 @@
 
 [![GitHub](https://img.shields.io/badge/github-postile-8da0cb?logo=github)](https://github.com/nyurik/postile)
 [![CI build](https://github.com/nyurik/postile/actions/workflows/ci.yml/badge.svg)](https://github.com/nyurik/postile/actions)
+[![Codecov](https://img.shields.io/codecov/c/github/nyurik/postile)](https://app.codecov.io/gh/nyurik/postile)
 
 A PostgreSQL extension with various map tile generation functions.  Some functions could help generating tiles for [Martin tile server](https://maplibre.org/martin/) and similar projects.
 
@@ -19,6 +20,7 @@ SELECT pt_brotli('Hello, world!');
 ```
 
 ## Development
+
 * This project is easier to develop with [just](https://github.com/casey/just#readme), a modern alternative to `make`.
   Install it with `cargo install just`.
 * To get a list of available commands, run `just`.
