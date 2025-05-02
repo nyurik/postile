@@ -28,7 +28,7 @@ pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg_test = []
 
 [dependencies]
-brotli = ">5, <8"
+brotli = ">5, <9"
 flate2 = "1"
 # Must match [dev-dependencies]
 pgrx = "0.13.1"
