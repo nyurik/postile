@@ -1,5 +1,7 @@
 #!/usr/bin/env just --justfile
 
+CRATE_NAME := "postile"
+
 @_default:
     just --list
 
@@ -37,6 +39,16 @@ semver *ARGS:
 # Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
 msrv:
     cargo msrv find --write-msrv --ignore-lockfile
+
+# Get the minimum supported Rust version (MSRV) for the crate
+get-msrv: (get-crate-field "rust_version")
+
+# Get any package's field from the metadata
+get-crate-field field package=CRATE_NAME:
+    cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}}'
+
+build:
+    cargo build --workspace --all-targets
 
 # Run cargo clippy to lint the code
 clippy:
@@ -115,6 +127,22 @@ cargo-install $COMMAND $INSTALL_CMD="" *ARGS="":
             echo "$COMMAND could not be found. Installing it with    cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}"
             cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}
         fi
+    fi
+
+# Verify that the current version of the crate is not the same as the one published on crates.io
+check-if-published:
+    #!/usr/bin/env bash
+    LOCAL_VERSION="$({{just_executable()}} get-crate-field version)"
+    echo "Detected crate version:  $LOCAL_VERSION"
+    CRATE_NAME="$({{just_executable()}} get-crate-field name)"
+    echo "Detected crate name:     $CRATE_NAME"
+    PUBLISHED_VERSION="$(cargo search ${CRATE_NAME} | grep "^${CRATE_NAME} =" | sed -E 's/.* = "(.*)".*/\1/')"
+    echo "Published crate version: $PUBLISHED_VERSION"
+    if [ "$LOCAL_VERSION" = "$PUBLISHED_VERSION" ]; then
+        echo "ERROR: The current crate version has already been published."
+        exit 1
+    else
+        echo "The current crate version has not yet been published."
     fi
 
 # Print current PGRX version
