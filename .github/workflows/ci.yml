@@ -17,17 +17,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: taiki-e/install-action@v2
-        with: { tool: just }
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
       - uses: actions/checkout@v4
-      - uses: Swatinem/rust-cache@v2
-        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+      - if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+        uses: Swatinem/rust-cache@v2
       - run: sudo apt-get install -y build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
       - name: Install PGRX with the needed version
         run: cargo binstall cargo-pgrx --version "$(just print-pgrx-version)"
       - run: cargo pgrx init
-      - run: just ci-test
+      - run: RUST_BACKTRACE=1 just ci-test
+      - name: Generate code coverage
+        run: just ci-coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: target/llvm-cov/codecov.info
+          fail_ci_if_error: true
 
 #  build:
 #    name: Build ${{ matrix.target }}
@@ -49,5 +55,5 @@ jobs:
 #        with:
 #          tool: just
 #      - uses: actions/checkout@v4
-#      - uses: Swatinem/rust-cache@v2
-#        if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+#      - if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
+#        uses: Swatinem/rust-cache@v2
