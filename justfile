@@ -17,10 +17,6 @@ build:
 check:
     RUSTFLAGS='-D warnings' cargo check --workspace --all-targets
 
-# Generate code coverage report
-coverage *ARGS="--no-clean --open":
-    cargo llvm-cov --workspace --all-targets --include-build-script {{ARGS}}
-
 # Verify that the current version of the crate is not the same as the one published on crates.io
 check-if-published:
     #!/usr/bin/env bash
@@ -57,6 +53,10 @@ clippy:
 # Use psql to connect to a database
 connect: cargo-pgrx
     cargo pgrx connect
+
+# Generate code coverage report
+coverage *ARGS="--no-clean --open":
+    cargo llvm-cov --workspace --all-targets --include-build-script {{ARGS}}
 
 # Build and open code documentation
 docs:
@@ -97,14 +97,6 @@ package: cargo-pgrx
 @print-pgrx-version: (assert "jq")
     cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
-# Ensure that a certain command is available
-[private]
-assert $COMMAND:
-    @if ! type "{{COMMAND}}" > /dev/null; then \
-        echo "Command '{{COMMAND}}' could not be found. Please make sure it has been installed on your computer." ;\
-        exit 1 ;\
-    fi
-
 # Print Rust version information
 @rust-info:
     rustc --version
@@ -138,9 +130,13 @@ update:
     cargo update
     cargo pgrx upgrade
 
-# Check if cargo-pgrx is installed, and install it if needed
+# Ensure that a certain command is available
 [private]
-cargo-pgrx: (cargo-install "cargo-pgrx")
+assert $COMMAND:
+    @if ! type "{{COMMAND}}" > /dev/null; then \
+        echo "Command '{{COMMAND}}' could not be found. Please make sure it has been installed on your computer." ;\
+        exit 1 ;\
+    fi
 
 # Check if a certain Cargo command is installed, and install it if needed
 [private]
@@ -156,3 +152,7 @@ cargo-install $COMMAND $INSTALL_CMD="" *ARGS="":
             cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}
         fi
     fi
+
+# Check if cargo-pgrx is installed, and install it if needed
+[private]
+cargo-pgrx: (cargo-install "cargo-pgrx")
