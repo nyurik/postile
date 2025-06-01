@@ -1,8 +1,14 @@
 **/*.rs.bk
+*.iml
 *.pdb
+.DS_Store
 .idea/
 .vscode/
+Cargo.lock
 debug/
+pg_regress/regression.diffs
+pg_regress/regression.out
+pg_regress/results
 target/
 temp/
 tmp/

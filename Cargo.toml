@@ -19,7 +19,6 @@ path = "./src/bin/pgrx_embed.rs"
 
 [features]
 default = ["pg17"]
-pg12 = ["pgrx/pg12", "pgrx-tests/pg12"]
 pg13 = ["pgrx/pg13", "pgrx-tests/pg13"]
 pg14 = ["pgrx/pg14", "pgrx-tests/pg14"]
 pg15 = ["pgrx/pg15", "pgrx-tests/pg15"]
@@ -28,14 +27,14 @@ pg17 = ["pgrx/pg17", "pgrx-tests/pg17"]
 pg_test = []
 
 [dependencies]
-brotli = ">5, <8"
+brotli = ">5, <9"
 flate2 = "1"
 # Must match [dev-dependencies]
-pgrx = "0.13.1"
+pgrx = "=0.14.3"
 
 [dev-dependencies]
 # Must match [dependencies]
-pgrx-tests = "0.13.1"
+pgrx-tests = "=0.14.3"
 
 [profile.dev]
 panic = "unwind"
