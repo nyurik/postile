@@ -1,11 +1,150 @@
 #!/usr/bin/env just --justfile
 
+main_crate := 'postile'
+
+# if running in CI, treat warnings as errors by setting RUSTFLAGS and RUSTDOCFLAGS to '-D warnings' unless they are already set
+# Use `CI=true just ci-test` to run the same tests as in GitHub CI.
+# Use `just env-info` to see the current values of RUSTFLAGS and RUSTDOCFLAGS
+ci_mode := if env('CI', '') != '' { '1' } else { '' }
+export RUSTFLAGS := env('RUSTFLAGS', if ci_mode == '1' {'-D warnings'} else {''})
+export RUSTDOCFLAGS := env('RUSTDOCFLAGS', if ci_mode == '1' {'-D warnings'} else {''})
+export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {''})
+
 @_default:
     just --list
+
+# Run benchmarks
+bench:
+    cargo bench
+    open target/criterion/report/index.html
+
+# Build the project
+build:
+    cargo build --workspace --all-targets
+
+# Quick compile without building a binary
+check:
+    cargo check --workspace --all-targets
+
+# Verify that the current version of the crate is not the same as the one published on crates.io
+check-if-published:  (assert 'jq')
+    #!/usr/bin/env bash
+    set -euo pipefail
+    LOCAL_VERSION="$({{just_executable()}} get-crate-field version)"
+    echo "Detected crate version:  '$LOCAL_VERSION'"
+    CRATE_NAME="$({{just_executable()}} get-crate-field name)"
+    echo "Detected crate name:     '$CRATE_NAME'"
+    PUBLISHED_VERSION="$(cargo search ${CRATE_NAME} | grep "^${CRATE_NAME} =" | sed -E 's/.* = "(.*)".*/\1/')"
+    echo "Published crate version: '$PUBLISHED_VERSION'"
+    if [ "$LOCAL_VERSION" = "$PUBLISHED_VERSION" ]; then
+        echo "ERROR: The current crate version has already been published."
+        exit 1
+    else
+        echo "The current crate version has not yet been published."
+    fi
+
+# Generate code coverage report to upload to codecov.io
+ci-coverage: && \
+            (coverage '--codecov --output-path target/llvm-cov/codecov.info')
+    # ATTENTION: the full file path above is used in the CI workflow
+    mkdir -p target/llvm-cov
+
+# Run all tests as expected by CI
+ci-test: env-info test-fmt clippy check test test-doc
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "$(git status --untracked-files --porcelain)" ]; then
+      >&2 echo 'ERROR: git repo is no longer clean. Make sure compilation and tests artifacts are in the .gitignore, and no repo files are modified.'
+      >&2 echo '######### git status ##########'
+      git status
+      exit 1
+    fi
 
 # Clean all build artifacts
 clean:
     cargo clean
+
+# Run cargo clippy to lint the code
+clippy:
+    cargo clippy --workspace --all-targets
+
+# Use psql to connect to a database
+connect:  (cargo-install 'cargo-pgrx')
+    cargo pgrx connect
+
+# Generate code coverage report. Will install `cargo llvm-cov` if missing.
+coverage *args='--no-clean --open':  (cargo-install 'cargo-llvm-cov')
+    cargo llvm-cov --workspace --all-targets --include-build-script {{args}}
+
+# Build and open code documentation
+docs:
+    cargo doc --no-deps --open
+
+# Print environment info
+env-info:
+    @echo "Running {{if ci_mode == '1' {'in CI mode'} else {'in dev mode'} }} on {{os()}} / {{arch()}}"
+    {{just_executable()}} --version
+    rustc --version
+    cargo --version
+    rustup --version
+    @echo "RUSTFLAGS='$RUSTFLAGS'"
+    @echo "RUSTDOCFLAGS='$RUSTDOCFLAGS'"
+
+# Reformat all code `cargo fmt`. If nightly is available, use it for better results
+fmt:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if rustup component list --toolchain nightly | grep rustfmt &> /dev/null; then
+        echo 'Reformatting Rust code using nightly Rust fmt to sort imports'
+        cargo +nightly fmt --all -- --config imports_granularity=Module,group_imports=StdExternalCrate
+    else
+        echo 'Reformatting Rust with the stable cargo fmt.  Install nightly with `rustup install nightly` for better results'
+        cargo fmt --all
+    fi
+
+# Get any package's field from the metadata
+get-crate-field field package=main_crate:
+    cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}}'
+
+# Get the minimum supported Rust version (MSRV) for the crate
+get-msrv:  (get-crate-field 'rust_version')
+
+# (Re-)initializing PGRX with all available PostgreSQL versions
+init:  (cargo-install 'cargo-pgrx')
+    cargo pgrx init
+
+# Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
+msrv:  (cargo-install 'cargo-msrv')
+    cargo msrv find --write-msrv --ignore-lockfile
+
+# Package extension
+package:  (cargo-install 'cargo-pgrx')
+    cargo pgrx package
+
+# Print current PGRX version
+@print-pgrx-version:  (assert 'jq')
+    cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
+
+# Check semver compatibility with prior published version. Install it with `cargo install cargo-semver-checks`
+semver *args:  (cargo-install 'cargo-semver-checks')
+    cargo semver-checks {{args}}
+
+# Run all tests
+test:  (cargo-install 'cargo-pgrx')
+    cargo pgrx test
+
+# Test documentation
+test-doc:
+    cargo test --doc
+    cargo doc --no-deps
+
+# Test code formatting
+test-fmt:
+    cargo fmt --all -- --check
+
+# Find unused dependencies. Install it with `cargo install cargo-udeps`
+udeps:  (cargo-install 'cargo-udeps')
+    cargo +nightly udeps --workspace --all-targets
 
 # Update all dependencies, including breaking changes. Requires nightly toolchain (install with `rustup install nightly`)
 update:
@@ -14,117 +153,25 @@ update:
     cargo update
     cargo pgrx upgrade
 
-# (Re-)initializing PGRX with all available PostgreSQL versions
-init: cargo-pgrx
-    cargo pgrx init
-
-# Package extension
-package: cargo-pgrx
-    cargo pgrx package
-
-# Use psql to connect to a database
-connect: cargo-pgrx
-    cargo pgrx connect
-
-# Find unused dependencies. Install it with `cargo install cargo-udeps`
-udeps:
-    cargo +nightly udeps --all-targets --workspace --all-features
-
-# Check semver compatibility with prior published version. Install it with `cargo install cargo-semver-checks`
-semver *ARGS:
-    cargo semver-checks {{ARGS}}
-
-# Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
-msrv:
-    cargo msrv find --write-msrv --ignore-lockfile
-
-# Run cargo clippy to lint the code
-clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
-
-# Test code formatting
-test-fmt:
-    cargo fmt --all -- --check
-
-# Reformat all code `cargo fmt`. If nightly is available, use it for better results
-fmt:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if command -v cargo +nightly &> /dev/null; then
-        echo 'Reformatting Rust code using nightly Rust fmt to sort imports'
-        cargo +nightly fmt --all -- --config imports_granularity=Module,group_imports=StdExternalCrate
-    else
-        echo 'Reformatting Rust with the stable cargo fmt.  Install nightly with `rustup install nightly` for better results'
-        cargo fmt --all
-    fi
-
-# Build and open code documentation
-docs:
-    cargo doc --no-deps --open
-
-# Run benchmarks
-bench:
-    cargo bench
-    open target/criterion/report/index.html
-
-# Quick compile without building a binary
-check:
-    RUSTFLAGS='-D warnings' cargo check --workspace --all-targets
-
-# Generate code coverage report
-coverage *ARGS="--no-clean --open":
-    cargo llvm-cov --workspace --all-targets --include-build-script {{ARGS}}
-
-# Generate code coverage report to upload to codecov.io
-ci-coverage: && \
-            (coverage '--codecov --output-path target/llvm-cov/codecov.info')
-    # ATTENTION: the full file path above is used in the CI workflow
-    mkdir -p target/llvm-cov
-
-# Run all tests
-test: cargo-pgrx
-    cargo pgrx test
-
-# Test documentation
-test-doc:
-    RUSTDOCFLAGS="-D warnings" cargo test --doc
-    RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
-
-# Print Rust version information
-@rust-info:
-    rustc --version
-    cargo --version
-
-# Run all tests as expected by CI
-ci-test: rust-info test-fmt clippy check test test-doc
-
-# Check if cargo-pgrx is installed, and install it if needed
+# Ensure that a certain command is available
 [private]
-cargo-pgrx: (cargo-install "cargo-pgrx")
+assert command:
+    @if ! type {{command}} > /dev/null; then \
+        echo "Command '{{command}}' could not be found. Please make sure it has been installed on your computer." ;\
+        exit 1 ;\
+    fi
 
 # Check if a certain Cargo command is installed, and install it if needed
 [private]
-cargo-install $COMMAND $INSTALL_CMD="" *ARGS="":
-    #!/usr/bin/env sh
-    set -eu
+cargo-install $COMMAND $INSTALL_CMD='' *args='':
+    #!/usr/bin/env bash
+    set -euo pipefail
     if ! command -v $COMMAND > /dev/null; then
         if ! command -v cargo-binstall > /dev/null; then
-            echo "$COMMAND could not be found. Installing it with    cargo install ${INSTALL_CMD:-$COMMAND} {{ARGS}}"
-            cargo install ${INSTALL_CMD:-$COMMAND} {{ARGS}}
+            echo "$COMMAND could not be found. Installing it with    cargo install ${INSTALL_CMD:-$COMMAND} --locked {{args}}"
+            cargo install ${INSTALL_CMD:-$COMMAND} --locked {{args}}
         else
-            echo "$COMMAND could not be found. Installing it with    cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}"
-            cargo binstall ${INSTALL_CMD:-$COMMAND} {{ARGS}}
+            echo "$COMMAND could not be found. Installing it with    cargo binstall ${INSTALL_CMD:-$COMMAND} --locked {{args}}"
+            cargo binstall ${INSTALL_CMD:-$COMMAND} --locked {{args}}
         fi
-    fi
-
-# Print current PGRX version
-@print-pgrx-version: (assert "jq")
-    cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
-
-# Ensure that a certain command is available
-[private]
-assert $COMMAND:
-    @if ! type "{{COMMAND}}" > /dev/null; then \
-        echo "Command '{{COMMAND}}' could not be found. Please make sure it has been installed on your computer." ;\
-        exit 1 ;\
     fi
