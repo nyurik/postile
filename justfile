@@ -1,17 +1,18 @@
 #!/usr/bin/env just --justfile
 
 main_crate := 'postile'
+features_flag := ''
 
 # if running in CI, treat warnings as errors by setting RUSTFLAGS and RUSTDOCFLAGS to '-D warnings' unless they are already set
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
 # Use `just env-info` to see the current values of RUSTFLAGS and RUSTDOCFLAGS
-ci_mode := if env('CI', '') != '' { '1' } else { '' }
+ci_mode := if env('CI', '') != '' {'1'} else {''}
 export RUSTFLAGS := env('RUSTFLAGS', if ci_mode == '1' {'-D warnings'} else {''})
 export RUSTDOCFLAGS := env('RUSTDOCFLAGS', if ci_mode == '1' {'-D warnings'} else {''})
 export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {''})
 
 @_default:
-    just --list
+    {{just_executable()}} --list
 
 # Run benchmarks
 bench:
@@ -20,14 +21,14 @@ bench:
 
 # Build the project
 build:
-    cargo build --workspace --all-targets
+    cargo build --workspace --all-targets {{features_flag}}
 
 # Quick compile without building a binary
 check:
-    cargo check --workspace --all-targets
+    cargo check --workspace --all-targets {{features_flag}}
 
 # Verify that the current version of the crate is not the same as the one published on crates.io
-check-if-published:  (assert 'jq')
+check-if-published:  (assert-cmd 'jq')
     #!/usr/bin/env bash
     set -euo pipefail
     LOCAL_VERSION="$({{just_executable()}} get-crate-field version)"
@@ -44,29 +45,21 @@ check-if-published:  (assert 'jq')
     fi
 
 # Generate code coverage report to upload to codecov.io
-ci-coverage: && \
+ci-coverage: env-info && \
             (coverage '--codecov --output-path target/llvm-cov/codecov.info')
     # ATTENTION: the full file path above is used in the CI workflow
     mkdir -p target/llvm-cov
 
 # Run all tests as expected by CI
-ci-test: env-info test-fmt clippy check test test-doc
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ -n "$(git status --untracked-files --porcelain)" ]; then
-      >&2 echo 'ERROR: git repo is no longer clean. Make sure compilation and tests artifacts are in the .gitignore, and no repo files are modified.'
-      >&2 echo '######### git status ##########'
-      git status
-      exit 1
-    fi
+ci-test: env-info test-fmt clippy check test test-doc && assert-git-is-clean
 
 # Clean all build artifacts
 clean:
     cargo clean
 
 # Run cargo clippy to lint the code
-clippy:
-    cargo clippy --workspace --all-targets
+clippy *args:
+    cargo clippy --workspace --all-targets {{features_flag}} {{args}}
 
 # Use psql to connect to a database
 connect:  (cargo-install 'cargo-pgrx')
@@ -122,12 +115,12 @@ package:  (cargo-install 'cargo-pgrx')
     cargo pgrx package
 
 # Print current PGRX version
-@print-pgrx-version:  (assert 'jq')
+@print-pgrx-version:  (assert-cmd 'jq')
     cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
 # Check semver compatibility with prior published version. Install it with `cargo install cargo-semver-checks`
 semver *args:  (cargo-install 'cargo-semver-checks')
-    cargo semver-checks {{args}}
+    cargo semver-checks {{features_flag}} {{args}}
 
 # Run all tests
 test:  (cargo-install 'cargo-pgrx')
@@ -155,10 +148,20 @@ update:
 
 # Ensure that a certain command is available
 [private]
-assert command:
+assert-cmd command:
     @if ! type {{command}} > /dev/null; then \
         echo "Command '{{command}}' could not be found. Please make sure it has been installed on your computer." ;\
         exit 1 ;\
+    fi
+
+# Make sure the git repo has no uncommitted changes
+[private]
+assert-git-is-clean:
+    @if [ -n "$(git status --untracked-files --porcelain)" ]; then \
+      >&2 echo "ERROR: git repo is no longer clean. Make sure compilation and tests artifacts are in the .gitignore, and no repo files are modified." ;\
+      >&2 echo "######### git status ##########" ;\
+      git status ;\
+      exit 1 ;\
     fi
 
 # Check if a certain Cargo command is installed, and install it if needed
