@@ -98,7 +98,7 @@ get-crate-field field package=main_crate:
     cargo metadata --format-version 1 | jq -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}}'
 
 # Get the minimum supported Rust version (MSRV) for the crate
-get-msrv:  (get-crate-field 'rust_version')
+get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 
 # (Re-)initializing PGRX with all available PostgreSQL versions
 init:  (cargo-install 'cargo-pgrx')
@@ -126,7 +126,7 @@ test:  (cargo-install 'cargo-pgrx')
     cargo test --workspace --doc {{features_flag}}
 
 # Test documentation generation
-test-doc: (docs '')
+test-doc:  (docs '')
 
 # Test code formatting
 test-fmt:
