@@ -65,7 +65,7 @@ connect:  (cargo-install 'cargo-pgrx')
 
 # Generate code coverage report. Will install `cargo llvm-cov` if missing.
 coverage *args='--no-clean --open':  (cargo-install 'cargo-llvm-cov')
-    cargo llvm-cov --workspace --all-targets --include-build-script {{args}}
+    cargo llvm-cov --workspace --all-targets {{features_flag}} --include-build-script {{args}}
 
 # Build and open code documentation
 docs *args='--open':
