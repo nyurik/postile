@@ -123,7 +123,7 @@ semver *args:  (cargo-install 'cargo-semver-checks')
 # Run all tests
 test:  (cargo-install 'cargo-pgrx')
     cargo pgrx test
-    cargo test --doc {{features_flag}}
+    cargo test --workspace --doc {{features_flag}}
 
 # Test documentation generation
 test-doc: (docs '')
