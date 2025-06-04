@@ -1,7 +1,7 @@
 # postile
 
-[![GitHub](https://img.shields.io/badge/github-postile-8da0cb?logo=github)](https://github.com/nyurik/postile)
-[![CI build](https://github.com/nyurik/postile/actions/workflows/ci.yml/badge.svg)](https://github.com/nyurik/postile/actions)
+[![GitHub repo](https://img.shields.io/badge/github-postile-8da0cb?logo=github)](https://github.com/nyurik/postile)
+[![CI build status](https://github.com/nyurik/postile/actions/workflows/ci.yml/badge.svg)](https://github.com/nyurik/postile/actions)
 [![Codecov](https://img.shields.io/codecov/c/github/nyurik/postile)](https://app.codecov.io/gh/nyurik/postile)
 
 A PostgreSQL extension with various map tile generation functions.  Some functions could help generating tiles for [Martin tile server](https://maplibre.org/martin/) and similar projects.
