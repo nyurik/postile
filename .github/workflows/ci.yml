@@ -7,10 +7,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-permissions:
-  pull-requests: write
-  contents: write
-
 defaults:
   run:
     shell: bash
