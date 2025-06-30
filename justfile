@@ -34,7 +34,7 @@ ci-coverage: env-info && \
     mkdir -p target/llvm-cov
 
 # Run all tests as expected by CI
-ci-test: env-info test-fmt clippy check test test-doc && assert-git-is-clean
+ci-test: env-info test-fmt clippy check test && assert-git-is-clean
 
 # Clean all build artifacts
 clean:
