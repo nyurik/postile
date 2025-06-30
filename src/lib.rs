@@ -1,7 +1,7 @@
 mod compression;
 mod pg_funcs;
 
-::pgrx::pg_module_magic!();
+::pgrx::pg_module_magic!(name, version);
 
 /// This module is required by `cargo pgrx test` invocations.
 /// It must be visible at the root of your extension crate.
