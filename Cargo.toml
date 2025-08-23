@@ -31,11 +31,11 @@ pg_test = []
 brotli = ">5, <9"
 flate2 = "1"
 # Must match [dev-dependencies]
-pgrx = "=0.15.0"
+pgrx = "0.16.0"
 
 [dev-dependencies]
 # Must match [dependencies]
-pgrx-tests = "=0.15.0"
+pgrx-tests = "0.16.0"
 
 [profile.dev]
 panic = "unwind"

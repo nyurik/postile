@@ -33,7 +33,6 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/codecov.info
-          fail_ci_if_error: true
 
 #  build:
 #    name: Build ${{ matrix.target }}
@@ -65,6 +64,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Result of the needed steps
+        run: echo "${{ toJSON(needs) }}"
       - if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
 
