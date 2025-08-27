@@ -22,12 +22,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
       - run: sudo apt-get install -y build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
-      - name: Install PGRX with the needed version
-        run: cargo binstall cargo-pgrx --version "$(just print-pgrx-version)"
-      - run: cargo pgrx init
+      - run: just init
       - run: just ci-test
-      - name: Generate code coverage
-        run: just ci-coverage
+      - run: just ci-coverage
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
