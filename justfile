@@ -48,7 +48,7 @@ clippy *args:
     cargo clippy --workspace --all-targets {{features_flag}} {{args}}
 
 # Use psql to connect to a database
-connect:  (cargo-install 'cargo-pgrx')
+connect:  install-pgrx
     cargo pgrx connect
 
 # Generate code coverage report. Will install `cargo llvm-cov` if missing.
@@ -95,15 +95,18 @@ get-crate-field field package=main_crate:  (assert-cmd 'jq')
 get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 
 # (Re-)initializing PGRX with all available PostgreSQL versions
-init:  (cargo-install 'cargo-pgrx')
+init:  install-pgrx
     cargo pgrx init
+
+install-pgrx:
+    {{just_executable()}} cargo-install cargo-pgrx --version "$({{just_executable()}} print-pgrx-version)"
 
 # Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
 msrv:  (cargo-install 'cargo-msrv')
     cargo msrv find --write-msrv --ignore-lockfile
 
 # Package extension
-package:  (cargo-install 'cargo-pgrx')
+package:  install-pgrx
     cargo pgrx package
 
 # Print current PGRX version
@@ -118,7 +121,7 @@ semver *args:  (cargo-install 'cargo-semver-checks')
     cargo semver-checks {{features_flag}} {{args}}
 
 # Run all tests
-test:  (cargo-install 'cargo-pgrx')
+test:  install-pgrx
     cargo pgrx test
     cargo test --workspace --doc {{features_flag}}
 
