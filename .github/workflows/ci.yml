@@ -21,7 +21,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
-      - run: sudo apt-get install -y build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
+      - uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
+          version: 1.0
       - run: just init
       - run: just ci-test
       - run: just ci-coverage
