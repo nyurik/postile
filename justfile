@@ -120,7 +120,7 @@ release *args='':  (cargo-install 'release-plz')
 semver *args:  (cargo-install 'cargo-semver-checks')
     cargo semver-checks {{features_flag}} {{args}}
 
-# Run all tests
+# Run all unit and integration tests
 test:  install-pgrx
     cargo pgrx test
     cargo test --workspace --doc {{features_flag}}
@@ -134,7 +134,7 @@ test-fmt: && (fmt-toml '--check' '--check-format')
 
 # Find unused dependencies. Install it with `cargo install cargo-udeps`
 udeps:  (cargo-install 'cargo-udeps')
-    cargo +nightly udeps --workspace --all-targets
+    cargo +nightly udeps --workspace --all-targets {{features_flag}}
 
 # Update all dependencies, including breaking changes. Requires nightly toolchain (install with `rustup install nightly`)
 update:
