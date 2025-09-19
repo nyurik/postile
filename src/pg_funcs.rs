@@ -1,7 +1,4 @@
-// See https://github.com/pgcentralfoundation/pgrx/pull/1740
-#![allow(clippy::used_underscore_binding)]
-
-use pgrx::{default, pg_extern};
+use pgrx::{default, error, pg_extern};
 
 use crate::compression;
 
@@ -9,16 +6,20 @@ use crate::compression;
 fn pt_gzip(data: Option<&[u8]>, level: default!(Option<i32>, "NULL")) -> Option<Vec<u8>> {
     // Need to take and return `Option` to handle NULL input in the second param
     // Otherwise calling it with NULL will panic, at least in tests
-    data.map(|v| compression::pt_gzip(v, level).unwrap())
+    data.map(|v| {
+        compression::pt_gzip(v, level)
+            .unwrap_or_else(|e| error!("pt_gzip failed: {}", e.to_string()))
+    })
 }
 
 #[pg_extern(immutable, parallel_safe)]
 fn pt_brotli(data: &[u8]) -> Vec<u8> {
-    compression::pt_brotli(data).unwrap()
+    compression::pt_brotli(data).unwrap_or_else(|e| error!("pt_brotli failed: {}", e.to_string()))
 }
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
+#[expect(clippy::unwrap_used)]
 mod tests {
     use std::fmt::Write as _;
 
