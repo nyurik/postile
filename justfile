@@ -6,6 +6,8 @@ main_crate := file_name(justfile_directory())
 just := quote(just_executable())
 # cargo-binstall needs a workaround due to caching when used in CI
 binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-telemetry'} else {''}
+# Default PG version to use for commands that require a PG version
+default_pg_ver := 'pg18'
 
 # if running in CI, treat warnings as errors by setting RUSTFLAGS and RUSTDOCFLAGS to '-D warnings' unless they are already set
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
@@ -106,16 +108,22 @@ install-pgrx:
 msrv:  (cargo-install 'cargo-msrv')
     cargo msrv find --write-msrv --ignore-lockfile
 
-# Package extension for a given PG version and create a tar.gz (e.g., `just package pg16`)
-package pg_ver: install-pgrx
+# Package extension for a given PG version and create a tar.gz (e.g., `just package pg18`)
+package pg_ver=default_pg_ver: install-pgrx
     #!/usr/bin/env bash
-    set -euo pipefail
+    set -euo pipefail -x
+    if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
+        echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected format is 'pgXX' where XX is the major version number (e.g., pg18)." >&2
+        exit 1
+    fi
     # Ensure the requested PG version is initialized, without affecting other versions
     if ! cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
         echo "Initializing pgrx for {{pg_ver}}..."
         cargo pgrx init --{{pg_ver}}=download
+    else
+        echo "Compiling package for {{pg_ver}}..."
     fi
-    cargo pgrx package --features {{pg_ver}} --no-default-features
+    cargo pgrx package --features {{pg_ver}} --no-default-features --pg-config $(cargo pgrx info pg-config {{pg_ver}})
     pkg_dir="target/release/postile-{{pg_ver}}"
     if [ ! -d "$pkg_dir" ]; then
         echo "ERROR: Package directory not found at $pkg_dir"
@@ -139,6 +147,17 @@ semver *args:  (cargo-install 'cargo-semver-checks')
 # Run all unit and integration tests
 test:  install-pgrx
     cargo pgrx test
+    cargo test --doc --workspace
+
+# Test for a specific PG version (e.g., `just test-pg pg18`)
+test-pg pg_ver: install-pgrx
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
+        echo "Initializing pgrx for {{pg_ver}}..."
+        cargo pgrx init --{{pg_ver}}=download
+    fi
+    cargo pgrx test {{pg_ver}}
     cargo test --doc --workspace
 
 # Test documentation generation
