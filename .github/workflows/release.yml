@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: Package pg${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [13, 14, 15, 16, 17, 18]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pg${{ matrix.pg }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-binstall
+      - uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
+          version: 1.0
+      - name: Cache pgrx-managed PostgreSQL
+        uses: actions/cache@v4
+        with:
+          path: ~/.pgrx
+          key: pgrx-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: pgrx-pg${{ matrix.pg }}-
+      - run: just package pg${{ matrix.pg }}
+      - name: Upload package to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/postile-pg${{ matrix.pg }}.tar.gz

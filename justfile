@@ -106,9 +106,24 @@ install-pgrx:
 msrv:  (cargo-install 'cargo-msrv')
     cargo msrv find --write-msrv --ignore-lockfile
 
-# Package extension
-package:  install-pgrx
-    cargo pgrx package
+# Package extension for a given PG version and create a tar.gz (e.g., `just package pg16`)
+package pg_ver: install-pgrx
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Ensure the requested PG version is initialized, without affecting other versions
+    if ! cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
+        echo "Initializing pgrx for {{pg_ver}}..."
+        cargo pgrx init --{{pg_ver}}=download
+    fi
+    cargo pgrx package --features {{pg_ver}} --no-default-features
+    pkg_dir="target/release/postile-{{pg_ver}}"
+    if [ ! -d "$pkg_dir" ]; then
+        echo "ERROR: Package directory not found at $pkg_dir"
+        ls -la target/release/ | grep postile || true
+        exit 1
+    fi
+    tar -czf "target/release/postile-{{pg_ver}}.tar.gz" -C "$pkg_dir" .
+    echo "Package created: target/release/postile-{{pg_ver}}.tar.gz"
 
 # Print current PGRX version
 @print-pgrx-version:  (assert-cmd 'jq')
