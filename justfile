@@ -1,6 +1,6 @@
 #!/usr/bin/env just --justfile
 
-# Define the name of the main crate based
+# Define the name of the main crate based on the directory name
 main_crate := file_name(justfile_directory())
 # How to call the current just executable. Note that just_executable() may have `\` in Windows paths, so we need to quote it.
 just := quote(just_executable())
@@ -63,7 +63,7 @@ docs *args='--open':
 # Print environment info
 env-info:
     @echo "Running for '{{main_crate}}' crate {{if ci_mode == '1' {'in CI mode'} else {'in dev mode'} }} on {{os()}} / {{arch()}}"
-    @echo "PWD $(pwd)"
+    @echo "PWD {{justfile_directory()}}"
     {{just}} --version
     rustc --version
     cargo --version
