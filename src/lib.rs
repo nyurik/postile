@@ -1,17 +1,15 @@
-use pgrx::{pg_extern, pg_schema};
-
 mod compression;
 mod pg_funcs;
 
-::pgrx::pg_module_magic!(name, version);
+pgrx::pg_module_magic!(name, version);
 
-#[pg_extern]
+#[pgrx::pg_extern]
 fn pt_hello_postile() -> &'static str {
     "Hello, postile"
 }
 
 #[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
+#[pgrx::pg_schema]
 mod tests {
     use pgrx::prelude::*;
 
@@ -22,7 +20,7 @@ mod tests {
 }
 
 #[cfg(feature = "pg_bench")]
-#[pg_schema]
+#[pgrx::pg_schema]
 mod benches {
     use pgrx::prelude::*;
     use pgrx_bench::{Bencher, black_box};
