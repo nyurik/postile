@@ -261,7 +261,7 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          sha="$(git rev-list -n 1 "$TAG")"
+          sha="$(git rev-parse HEAD)"
           run_id="$(gh run list \
             --workflow "$GITHUB_WORKFLOW" \
             --branch main \
