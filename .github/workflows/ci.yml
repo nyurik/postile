@@ -35,7 +35,7 @@ jobs:
             os: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/.crates.toml
@@ -48,13 +48,14 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall' }
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.pgrx/config.toml
             ~/.pgrx/${{ matrix.pg }}.*
           key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
+      - run: just ci-lint
       - name: Install PostgreSQL and build dependencies (Linux)
         run: |
           sudo apt-get update
@@ -68,14 +69,12 @@ jobs:
             postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
           echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
       - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
-      - run: just ci-lint
-      - run: just test-pg pg${{ matrix.pg }}
+      - run: just test-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
       - run: just ci-coverage
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
@@ -104,7 +103,7 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/.crates.toml
@@ -117,13 +116,15 @@ jobs:
           cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall' }
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             ~/.pgrx/config.toml
             ~/.pgrx/${{ matrix.pg }}.*
           key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        run: just ci-lint
       - if: runner.os == 'Linux'
         name: Install PostgreSQL and build dependencies (Linux)
         run: |
@@ -153,10 +154,7 @@ jobs:
         name: Select pgrx-managed PostgreSQL (Windows)
         run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
       - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
-        run: just ci-lint
-      - run: just test-pg pg${{ matrix.pg }}
+      - run: just test-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
@@ -164,7 +162,7 @@ jobs:
         run: just ci-coverage
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
@@ -173,7 +171,7 @@ jobs:
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: just package pg${{ matrix.pg }}
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.target.name }}-pg${{ matrix.pg }}
           path: target/release/postile-pg${{ matrix.pg }}/
@@ -191,9 +189,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: taiki-e/install-action@v2
-        with:
-          tool: just
-      - uses: actions/download-artifact@v4
+        with: { tool: just }
+      - uses: actions/download-artifact@v8
         with:
           pattern: package-${{ matrix.target }}-pg*
           path: target/release/packages
@@ -212,7 +209,7 @@ jobs:
             cp -a "$src/." "$dst/"
           done
       - run: just bundle-platform ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-bundle-${{ matrix.target }}
           path: target/release/postile-v*-${{ matrix.target }}.*
@@ -235,13 +232,9 @@ jobs:
     name: Upload to Release
     if: github.event_name == 'release' && github.event.action == 'published'
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
+    permissions: { actions: read, contents: write }
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
       - name: Download bundled artifacts from matching main CI run
         env:
           GH_TOKEN: ${{ github.token }}

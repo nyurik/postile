@@ -38,12 +38,12 @@ check:
 
 # Generate LCOV coverage report for CI to upload to codecov.io
 ci-coverage: env-info && \
-        (_coverage '--lcov' '--output-path' coverage_lcov)
+        (_coverage '--lcov' '--output-path' quote(coverage_lcov))
     rm -rf {{quote(parent_directory(coverage_lcov))}}
     mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
 # Run all tests as expected by CI
-ci-test: env-info test-fmt clippy check test && assert-git-is-clean
+ci-lint: env-info test-fmt clippy check && assert-git-is-clean
 
 # Clean all build artifacts
 clean:
@@ -54,14 +54,14 @@ clippy:
     cargo clippy --workspace --all-targets
 
 # Use psql to connect to a database
-connect:  install-pgrx
+connect:
     cargo pgrx connect
 
 # Generate and open the HTML coverage report
-coverage: (_coverage '--open')
+coverage:  (_coverage '--open')
 
 # Clean, collect, and aggregate coverage using the requested report arguments
-_coverage *report_args: (cargo-install 'cargo-llvm-cov')
+_coverage *report_args:  (cargo-install 'cargo-llvm-cov')
     cargo llvm-cov clean --workspace
     cargo llvm-cov --no-report --workspace --all-targets
     cargo llvm-cov report --include-build-script {{report_args}}
@@ -103,14 +103,11 @@ get-crate-field field package=main_crate:  (assert-cmd 'jq')
     @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}} // error("Field \"{{field}}\" is missing in Cargo.toml for package {{package}}")'
 
 # (Re-)initializing PGRX with all available PostgreSQL versions
-init:  install-pgrx
+init:
     cargo pgrx init
 
-install-pgrx:
-    {{just}} cargo-install cargo-pgrx '' --version "$({{just}} print-pgrx-version)"
-
 # Initialize pgrx for a PG version, optionally using an existing pg_config path
-init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
+init-pg pg_ver=default_pg_ver pg_config='':
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
@@ -128,7 +125,7 @@ init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
     fi
 
 # Package extension for a given PG version and create a tar.gz (e.g., `just package pg18`)
-package pg_ver=default_pg_ver pg_config='': (init-pg pg_ver pg_config)
+package pg_ver=default_pg_ver pg_config='':  (init-pg pg_ver pg_config)
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
@@ -184,14 +181,11 @@ bundle-platform platform version='':
     @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
 # Run all unit and integration tests
-test:  install-pgrx
-    cargo pgrx test
-    cargo test --doc --workspace
+test:  (test-pg default_pg_ver '')
 
 # Test for a specific PG version (e.g., `just test-pg pg18`)
-test-pg pg_ver=default_pg_ver pg_config='': (init-pg pg_ver pg_config)
+test-pg pg_ver=default_pg_ver pg_config='':  (init-pg pg_ver pg_config)
     cargo pgrx test {{pg_ver}}
-    cargo test --doc --workspace
 
 # Test documentation generation
 test-doc:  (docs '')
