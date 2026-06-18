@@ -55,24 +55,35 @@ jobs:
             ~/.pgrx/${{ matrix.pg }}.*
           key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
-      - run: just ci-lint
-      - name: Install PostgreSQL and build dependencies (Linux)
+      - name: Configure PGDG apt repository
         run: |
           sudo apt-get update
           sudo apt-get install -y ca-certificates curl gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
           echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison \
-            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config \
+      - name: Install PostgreSQL and build dependencies (Linux)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison
+            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
             postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
-          echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
-      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - run: just test-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+          version: ${{ matrix.target.name }}-pg${{ matrix.pg }}-v1
+          execute_install_scripts: true
+      - name: Set pg_config path
+        run: echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
+      - name: Remove cached pgrx data directory
+        run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - name: Initialize pgrx
+        run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - name: Lint
+        run: just ci-lint pg${{ matrix.pg }}
+      - name: Test
+        run: just test pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
-      - run: just ci-coverage
+      - name: Coverage
+        run: just ci-coverage pg${{ matrix.pg }}
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -123,21 +134,26 @@ jobs:
             ~/.pgrx/${{ matrix.pg }}.*
           key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
-        run: just ci-lint
       - if: runner.os == 'Linux'
-        name: Install PostgreSQL and build dependencies (Linux)
+        name: Configure PGDG apt repository
         run: |
           sudo apt-get update
           sudo apt-get install -y ca-certificates curl gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
           echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison \
-            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config \
+      - if: runner.os == 'Linux'
+        name: Install PostgreSQL and build dependencies (Linux)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison
+            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
             postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
-          echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
+          version: ${{ matrix.target.name }}-pg${{ matrix.pg }}-v1
+          execute_install_scripts: true
+      - if: runner.os == 'Linux'
+        name: Set Linux pg_config path
+        run: echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
       - if: runner.os == 'macOS'
         name: Install PostgreSQL and build dependencies (macOS)
         run: |
@@ -153,13 +169,18 @@ jobs:
       - if: runner.os == 'Windows'
         name: Select pgrx-managed PostgreSQL (Windows)
         run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
-      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - run: just test-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - name: Remove cached pgrx data directory
+        run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        run: just ci-lint pg${{ matrix.pg }}
+      - name: Test
+        run: just test pg${{ matrix.pg }}
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
-        run: just ci-coverage
+        run: just ci-coverage pg${{ matrix.pg }}
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
