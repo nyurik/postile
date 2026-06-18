@@ -33,6 +33,14 @@ jobs:
         target:
           - name: linux-x86_64
             os: ubuntu-24.04
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+          - name: macos-aarch64
+            os: macOS-14
+          - name: macos-x86_64
+            os: macOS-13
+          - name: windows-x86_64
+            os: windows-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v5
@@ -46,8 +54,12 @@ jobs:
         with:
           key: ${{ matrix.target.name }}-pg${{ matrix.pg }}
           cache-on-failure: true
-      - uses: taiki-e/install-action@v2
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
+      - if: runner.os != 'Linux'
+        uses: taiki-e/install-action@v2
+        with: { tool: 'just,cargo-binstall' }
       - uses: actions/cache@v5
         with:
           path: |
@@ -55,14 +67,16 @@ jobs:
             ~/.pgrx/${{ matrix.pg }}.*
           key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
-      - name: Configure PGDG apt repository
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        name: Configure PGDG apt repository
         run: |
           sudo apt-get update
           sudo apt-get install -y ca-certificates curl gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
           echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-      - name: Install PostgreSQL and build dependencies (Linux)
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        name: Install PostgreSQL and build dependencies (Linux)
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
           packages: >-
@@ -71,22 +85,36 @@ jobs:
             postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
           version: ${{ matrix.target.name }}-pg${{ matrix.pg }}-v1
           execute_install_scripts: true
-      - name: Set pg_config path
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        name: Set pg_config path
         run: |
           pg_config_path="/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config"
           echo "PG_CONFIG_PATH=${pg_config_path}" >> "$GITHUB_ENV"
           sudo chmod a+rwx "$("${pg_config_path}" --pkglibdir)" "$("${pg_config_path}" --sharedir)/extension"
+      - if: runner.os == 'macOS'
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install icu4c pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig" >> "$GITHUB_ENV"
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install postgresql@${{ matrix.pg }}
+          echo "$(brew --prefix postgresql@${{ matrix.pg }})/bin" >> "$GITHUB_PATH"
+          echo "PG_CONFIG_PATH=$(brew --prefix postgresql@${{ matrix.pg }})/bin/pg_config" >> "$GITHUB_ENV"
+      - if: runner.os == 'Windows'
+        run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
       - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
       - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
-      - run: just ci-lint pg${{ matrix.pg }}
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        run: just ci-lint pg${{ matrix.pg }}
       - run: just test pg${{ matrix.pg }}
-      - run: just ci-coverage pg${{ matrix.pg }}
-      - name: Upload coverage to Codecov
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        run: just ci-coverage pg${{ matrix.pg }}
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
-      - run: just assert-git-is-clean
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        run: just assert-git-is-clean
 
   test:
     name: ${{ matrix.target.name }} pg${{ matrix.pg }}
