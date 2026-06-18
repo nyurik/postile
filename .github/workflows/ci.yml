@@ -72,11 +72,14 @@ jobs:
           version: ${{ matrix.target.name }}-pg${{ matrix.pg }}-v1
           execute_install_scripts: true
       - name: Set pg_config path
-        run: echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
+        run: |
+          pg_config_path="/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config"
+          echo "PG_CONFIG_PATH=${pg_config_path}" >> "$GITHUB_ENV"
+          sudo chmod a+rwx "$("${pg_config_path}" --pkglibdir)" "$("${pg_config_path}" --sharedir)/extension"
       - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
       - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - run: just ci-lint pg${{ matrix.pg }}
-      # - run: just test pg${{ matrix.pg }}
+      - run: just test pg${{ matrix.pg }}
       # - uses: taiki-e/install-action@v2
       #   with: { tool: cargo-llvm-cov }
       # - run: just ci-coverage pg${{ matrix.pg }}
@@ -150,7 +153,10 @@ jobs:
           execute_install_scripts: true
       - if: runner.os == 'Linux'
         name: Set Linux pg_config path
-        run: echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
+        run: |
+          pg_config_path="/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config"
+          echo "PG_CONFIG_PATH=${pg_config_path}" >> "$GITHUB_ENV"
+          sudo chmod a+rwx "$("${pg_config_path}" --pkglibdir)" "$("${pg_config_path}" --sharedir)/extension"
       - if: runner.os == 'macOS'
         name: Install PostgreSQL and build dependencies (macOS)
         run: |
