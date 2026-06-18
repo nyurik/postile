@@ -1,12 +1,12 @@
+use pgrx::{pg_extern, pg_schema};
+
 mod compression;
 mod pg_funcs;
-
-use pgrx::prelude::*;
 
 ::pgrx::pg_module_magic!(name, version);
 
 #[pg_extern]
-fn hello_postile() -> &'static str {
+fn pt_hello_postile() -> &'static str {
     "Hello, postile"
 }
 
@@ -17,7 +17,7 @@ mod tests {
 
     #[pg_test]
     fn test_hello_postile() {
-        assert_eq!("Hello, postile", crate::hello_postile());
+        assert_eq!("Hello, postile", crate::pt_hello_postile());
     }
 }
 
@@ -30,7 +30,7 @@ mod benches {
     #[pg_bench]
     fn bench_hello_postile(b: &mut Bencher) {
         b.iter(|| {
-            black_box(crate::hello_postile());
+            black_box(crate::pt_hello_postile());
         });
     }
 }

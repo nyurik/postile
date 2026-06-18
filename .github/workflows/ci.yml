@@ -61,6 +61,7 @@ jobs:
           sudo apt-get install -y ca-certificates curl gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
           echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
       - name: Install PostgreSQL and build dependencies (Linux)
         uses: awalsh128/cache-apt-pkgs-action@v1
         with:
@@ -75,7 +76,7 @@ jobs:
       - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
       - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - run: just ci-lint pg${{ matrix.pg }}
-      - run: just test pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - run: just test pg${{ matrix.pg }}
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
       - run: just ci-coverage pg${{ matrix.pg }}
@@ -136,6 +137,7 @@ jobs:
           sudo apt-get install -y ca-certificates curl gnupg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
           echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
       - if: runner.os == 'Linux'
         name: Install PostgreSQL and build dependencies (Linux)
         uses: awalsh128/cache-apt-pkgs-action@v1

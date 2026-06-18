@@ -128,7 +128,7 @@ init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
     fi
 
 # Package extension for a given PG version and create a tar.gz (e.g., `just package pg18`)
-package pg_ver=default_pg_ver pg_config='':  (init-pg pg_ver pg_config)
+package pg_ver=default_pg_ver:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
