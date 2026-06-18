@@ -47,7 +47,6 @@ codegen-units = 1
 
 [lints.rust]
 unused_qualifications = "warn"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(pgrx_embed)"] }
 
 [lints.clippy]
 # Restrictions

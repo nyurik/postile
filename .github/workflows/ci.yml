@@ -5,83 +5,223 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  release:
+    types: [ published ]
   workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Run the full OS/PostgreSQL matrix
+        required: false
+        type: boolean
+        default: true
 
 defaults:
   run:
     shell: bash
 
 jobs:
-  test:
+  test-pr:
     name: ${{ matrix.target.name }} pg${{ matrix.pg }}
+    if: |
+      github.event_name == 'pull_request'
+      || (github.event_name == 'workflow_dispatch' && !inputs.full_matrix)
     runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
       matrix:
-        pg: [13, 14, 15, 16, 17, 18]
+        pg: [ 18 ]
         target:
-          - name: aarch64-apple-darwin
-            os: macOS-14
-          - name: x86_64-apple-darwin
-            os: macOS-13
-          - name: x86_64-pc-windows-msvc
-            os: windows-latest
-          - name: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+          - name: linux-x86_64
+            os: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-        uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/bin/cargo-pgrx
+          key: cargo-pgrx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml') }}
+      - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target.name }}-pg${{ matrix.pg }}
+          cache-on-failure: true
       - uses: taiki-e/install-action@v2
+        with: { tool: 'just,cargo-binstall' }
+      - uses: actions/cache@v4
         with:
-          tool: just,cargo-binstall
-      # Linux build deps
-      - if: runner.os == 'Linux'
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
-          version: 1.0
-      # macOS build deps
-      - if: runner.os == 'macOS'
+          path: |
+            ~/.pgrx/config.toml
+            ~/.pgrx/${{ matrix.pg }}.*
+          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
+      - name: Install PostgreSQL and build dependencies (Linux)
         run: |
-          brew install icu4c pkg-config
-          echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig" >> "$GITHUB_ENV"
-      # Lint (once, on the primary matrix entry)
-      - if: matrix.target.os == 'ubuntu-latest' && matrix.pg == 13
-        name: Lint
-        run: just env-info test-fmt clippy check
-      # Test
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison \
+            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config \
+            postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
+          echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
+      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - run: just ci-lint
       - run: just test-pg pg${{ matrix.pg }}
-      # Coverage (once, on the primary matrix entry)
-      - if: matrix.target.os == 'ubuntu-latest' && matrix.pg == 13
+      - uses: taiki-e/install-action@v2
+        with: { tool: cargo-llvm-cov }
+      - run: just ci-coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: target/llvm-cov/lcov.info
+      - run: just assert-git-is-clean
+
+  test:
+    name: ${{ matrix.target.name }} pg${{ matrix.pg }}
+    if: |
+      github.event_name == 'push'
+      || (github.event_name == 'workflow_dispatch' && inputs.full_matrix)
+    runs-on: ${{ matrix.target.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [ 13, 14, 15, 16, 17, 18 ]
+        target:
+          - name: linux-x86_64
+            os: ubuntu-24.04
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+          - name: macos-aarch64
+            os: macOS-14
+          - name: macos-x86_64
+            os: macOS-13
+          - name: windows-x86_64
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/bin/cargo-pgrx
+          key: cargo-pgrx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml') }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}
+          cache-on-failure: true
+      - uses: taiki-e/install-action@v2
+        with: { tool: 'just,cargo-binstall' }
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pgrx/config.toml
+            ~/.pgrx/${{ matrix.pg }}.*
+          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
+      - if: runner.os == 'Linux'
+        name: Install PostgreSQL and build dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates curl gnupg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison \
+            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config \
+            postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
+          echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
+      - if: runner.os == 'macOS'
+        name: Install PostgreSQL and build dependencies (macOS)
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install icu4c pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig" >> "$GITHUB_ENV"
+          if HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install postgresql@${{ matrix.pg }}; then
+            echo "$(brew --prefix postgresql@${{ matrix.pg }})/bin" >> "$GITHUB_PATH"
+            echo "PG_CONFIG_PATH=$(brew --prefix postgresql@${{ matrix.pg }})/bin/pg_config" >> "$GITHUB_ENV"
+          else
+            echo "Homebrew postgresql@${{ matrix.pg }} is unavailable; pgrx will download PostgreSQL."
+            echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
+          fi
+      - if: runner.os == 'Windows'
+        name: Select pgrx-managed PostgreSQL (Windows)
+        run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
+      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+        run: just ci-lint
+      - run: just test-pg pg${{ matrix.pg }}
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
-      - if: matrix.target.os == 'ubuntu-latest' && matrix.pg == 13
-        name: Coverage
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         run: just ci-coverage
-      - if: matrix.target.os == 'ubuntu-latest' && matrix.pg == 13
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: target/llvm-cov/codecov.info
-      - if: matrix.target.os == 'ubuntu-latest' && matrix.pg == 13
+          files: target/llvm-cov/lcov.info
+      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         run: just assert-git-is-clean
-      # Package (Linux + main branch only)
-      - if: runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: just package pg${{ matrix.pg }}
-      - if: runner.os == 'Linux' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: postile-pg${{ matrix.pg }}
-          path: target/release/postile-pg${{ matrix.pg }}.tar.gz
+          name: package-${{ matrix.target.name }}-pg${{ matrix.pg }}
+          path: target/release/postile-pg${{ matrix.pg }}/
+          if-no-files-found: error
+
+  bundle:
+    name: Bundle ${{ matrix.target }}
+    needs: [ test ]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, windows-x86_64 ]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-${{ matrix.target }}-pg*
+          path: target/release/packages
+      - name: Arrange package directories
+        run: |
+          set -euo pipefail
+          for pg in 13 14 15 16 17 18; do
+            src="target/release/packages/package-${{ matrix.target }}-pg${pg}"
+            dst="target/release/postile-pg${pg}"
+            if [ ! -d "$src" ]; then
+              echo "Missing package artifact: $src" >&2
+              exit 1
+            fi
+            rm -rf "$dst"
+            mkdir -p "$dst"
+            cp -a "$src/." "$dst/"
+          done
+      - run: just bundle-platform ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle-${{ matrix.target }}
+          path: target/release/postile-v*-${{ matrix.target }}.*
+          if-no-files-found: error
 
   # This job checks if any of the previous jobs failed or were canceled.
   # This approach also allows some jobs to be skipped if they are not needed.
   ci-passed:
-    needs: [ test ]
+    needs: [ test-pr, test, bundle ]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -90,60 +230,48 @@ jobs:
       - if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
 
-  # Release unpublished packages or create a PR with changes
-  release-plz:
-    needs: [ ci-passed ]
-    if: |
-      always()
-      && needs.ci-passed.result == 'success'
-      && github.event_name == 'push'
-      && github.ref == 'refs/heads/main'
-      && github.repository_owner == 'nyurik'
+  # Upload the already-tested main-branch package artifacts to a published GitHub Release.
+  upload-release:
+    name: Upload to Release
+    if: github.event_name == 'release' && github.event.action == 'published'
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: write
-      id-token: write
-      pull-requests: write
-    concurrency:
-      group: release-plz-${{ github.ref }}
-      cancel-in-progress: false
-    outputs:
-      releases_created: ${{ steps.release.outputs.releases_created }}
-      tag: ${{ steps.get-tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v5
-        with: { fetch-depth: 0, persist-credentials: false }
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Publish to crates.io if crate's version is newer
-        uses: release-plz/action@v0.5
-        id: release
-        with: { command: release }
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-      - if: ${{ steps.release.outputs.releases_created == 'false' }}
-        name: If version is the same, create a PR proposing new version and changelog for the next release
-        uses: release-plz/action@v0.5
-        with: { command: release-pr }
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-      - name: Extract release tag
-        id: get-tag
-        if: steps.release.outputs.releases_created == 'true'
-        env:
-          RELEASES: ${{ steps.release.outputs.releases }}
-        run: echo "tag=$(echo "$RELEASES" | jq -r '.[0].tag')" >> "$GITHUB_OUTPUT"
-      - if: steps.release.outputs.releases_created == 'false'
-        name: Create/update a PR proposing new version and changelog
-        uses: release-plz/action@v0.5
-        with: { command: release-pr }
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-      - if: steps.release.outputs.releases_created == 'false'
-        uses: actions/download-artifact@v4
-        with: { pattern: postile-pg*, merge-multiple: true }
-      - if: steps.release.outputs.releases_created == 'false'
-        name: Upload packages to GitHub Release
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Download bundled artifacts from matching main CI run
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-plz.outputs.tag }}
-        run: gh release upload "$TAG" *.tar.gz --repo "$GITHUB_REPOSITORY"
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-list -n 1 "$TAG")"
+          run_id="$(gh run list \
+            --workflow "$GITHUB_WORKFLOW" \
+            --branch main \
+            --commit "$sha" \
+            --event push \
+            --status success \
+            --json databaseId \
+            --jq '.[0].databaseId')"
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "No successful main CI run with release bundles found for $TAG ($sha)." >&2
+            exit 1
+          fi
+          gh run download "$run_id" --pattern 'release-bundle-*' --dir release
+      - name: Upload packages to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+          assets=(release/**/*.tar.gz release/**/*.zip)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release bundle assets were downloaded." >&2
+            exit 1
+          fi
+          gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber

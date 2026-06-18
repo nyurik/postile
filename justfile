@@ -9,6 +9,8 @@ binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-tele
 coverage_lcov := 'target/llvm-cov/lcov.info'
 # Default PG version to use for commands that require a PG version
 default_pg_ver := 'pg18'
+# PostgreSQL versions supported by the pgrx version in Cargo.toml
+supported_pg_versions := 'pg13 pg14 pg15 pg16 pg17 pg18'
 
 # if running in CI, treat warnings as errors by setting RUSTFLAGS and RUSTDOCFLAGS to '-D warnings' unless they are already set
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
@@ -48,8 +50,8 @@ clean:
     cargo clean
 
 # Run cargo clippy to lint the code
-clippy *args:
-    cargo clippy --workspace --all-targets {{args}}
+clippy:
+    cargo clippy --workspace --all-targets
 
 # Use psql to connect to a database
 connect:  install-pgrx
@@ -107,26 +109,35 @@ init:  install-pgrx
 install-pgrx:
     {{just}} cargo-install cargo-pgrx '' --version "$({{just}} print-pgrx-version)"
 
-# Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
-msrv:  (cargo-install 'cargo-msrv')
-    cargo msrv find --write-msrv --ignore-lockfile
+# Initialize pgrx for a PG version, optionally using an existing pg_config path
+init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
+        echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected 'pgXX' (for example, pg18)." >&2
+        exit 1
+    fi
+    if cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
+        echo "pgrx already initialized for {{pg_ver}}"
+    elif [ -n "{{pg_config}}" ]; then
+        echo "Initializing pgrx for {{pg_ver}} with {{pg_config}}"
+        cargo pgrx init --{{pg_ver}} {{quote(pg_config)}}
+    else
+        echo "Initializing pgrx for {{pg_ver}} by downloading PostgreSQL"
+        cargo pgrx init --{{pg_ver}}=download
+    fi
 
 # Package extension for a given PG version and create a tar.gz (e.g., `just package pg18`)
-package pg_ver=default_pg_ver: install-pgrx
+package pg_ver=default_pg_ver pg_config='': (init-pg pg_ver pg_config)
     #!/usr/bin/env bash
-    set -euo pipefail -x
+    set -euo pipefail
     if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
         echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected format is 'pgXX' where XX is the major version number (e.g., pg18)." >&2
         exit 1
     fi
-    # Ensure the requested PG version is initialized, without affecting other versions
-    if ! cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
-        echo "Initializing pgrx for {{pg_ver}}..."
-        cargo pgrx init --{{pg_ver}}=download
-    else
-        echo "Compiling package for {{pg_ver}}..."
-    fi
-    cargo pgrx package --features {{pg_ver}} --no-default-features --pg-config $(cargo pgrx info pg-config {{pg_ver}})
+    pg_config_path="$(cargo pgrx info pg-config {{pg_ver}})"
+    echo "Packaging {{pg_ver}} with ${pg_config_path}"
+    cargo pgrx package --features {{pg_ver}} --no-default-features --pg-config "${pg_config_path}"
     pkg_dir="target/release/postile-{{pg_ver}}"
     if [ ! -d "$pkg_dir" ]; then
         echo "ERROR: Package directory not found at $pkg_dir"
@@ -136,16 +147,41 @@ package pg_ver=default_pg_ver: install-pgrx
     tar -czf "target/release/postile-{{pg_ver}}.tar.gz" -C "$pkg_dir" .
     echo "Package created: target/release/postile-{{pg_ver}}.tar.gz"
 
+# Bundle all per-PG package directories for one platform into a release archive
+bundle-platform platform version='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version="{{version}}"
+    if [ -z "$version" ]; then
+        version="$({{just}} get-crate-field version)"
+    fi
+    bundle_name="postile-v${version}-{{platform}}"
+    bundle_dir="target/release/${bundle_name}"
+    rm -rf "$bundle_dir"
+    mkdir -p "$bundle_dir"
+    for pg_ver in {{supported_pg_versions}}; do
+        pkg_dir="target/release/postile-${pg_ver}"
+        if [ ! -d "$pkg_dir" ]; then
+            echo "ERROR: Package directory not found at $pkg_dir" >&2
+            exit 1
+        fi
+        mkdir -p "$bundle_dir/$pg_ver"
+        cp -a "$pkg_dir/." "$bundle_dir/$pg_ver/"
+    done
+    if [[ "{{platform}}" == windows-* ]]; then
+        archive="target/release/${bundle_name}.zip"
+        rm -f "$archive"
+        python -c 'import pathlib, sys, zipfile; archive = pathlib.Path(sys.argv[1]); root = pathlib.Path(sys.argv[2]); zf = zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED); [zf.write(path, path.relative_to(root)) for path in sorted(root.rglob("*")) if path.is_file()]; zf.close()' "$archive" "$bundle_dir"
+    else
+        archive="target/release/${bundle_name}.tar.gz"
+        rm -f "$archive"
+        tar -czf "$archive" -C "$bundle_dir" .
+    fi
+    echo "Bundle created: $archive"
+
 # Print current PGRX version
 @print-pgrx-version:  (assert-cmd 'jq')
     @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
-
-release *args='':  (cargo-install 'release-plz')
-    release-plz {{args}}
-
-# Check semver compatibility with prior published version. Install it with `cargo install cargo-semver-checks`
-semver *args:  (cargo-install 'cargo-semver-checks')
-    cargo semver-checks {{args}}
 
 # Run all unit and integration tests
 test:  install-pgrx
@@ -153,13 +189,7 @@ test:  install-pgrx
     cargo test --doc --workspace
 
 # Test for a specific PG version (e.g., `just test-pg pg18`)
-test-pg pg_ver: install-pgrx
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
-        echo "Initializing pgrx for {{pg_ver}}..."
-        cargo pgrx init --{{pg_ver}}=download
-    fi
+test-pg pg_ver=default_pg_ver pg_config='': (init-pg pg_ver pg_config)
     cargo pgrx test {{pg_ver}}
     cargo test --doc --workspace
 
