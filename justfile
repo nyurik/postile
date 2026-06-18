@@ -1,11 +1,16 @@
 #!/usr/bin/env just --justfile
 
-# Define the name of the main crate based
-main_crate := file_name(justfile_directory())
+main_crate := 'postile'
 # How to call the current just executable. Note that just_executable() may have `\` in Windows paths, so we need to quote it.
 just := quote(just_executable())
 # cargo-binstall needs a workaround due to caching when used in CI
 binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-telemetry'} else {''}
+# location of the coverage output, used by CI
+coverage_lcov := 'target/llvm-cov/lcov.info'
+# Default PG version to use for commands that require a PG version
+default_pg_ver := 'pg18'
+# PostgreSQL versions supported by the pgrx version in Cargo.toml
+supported_pg_versions := 'pg13 pg14 pg15 pg16 pg17 pg18'
 
 # if running in CI, treat warnings as errors by setting RUSTFLAGS and RUSTDOCFLAGS to '-D warnings' unless they are already set
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
@@ -27,34 +32,39 @@ bench:
 build:
     cargo build --workspace --all-targets
 
-# Quick compile without building a binary
-check:
-    cargo check --workspace --all-targets
+# Quick compile without building a binary for a PG version
+check pg_ver=default_pg_ver:
+    cargo check --workspace --all-targets --no-default-features --features {{pg_ver}}
 
-# Generate code coverage report to upload to codecov.io
-ci-coverage: env-info && \
-            (coverage '--codecov --output-path target/llvm-cov/codecov.info')
-    # ATTENTION: the full file path above is used in the CI workflow
-    mkdir -p target/llvm-cov
+# Generate LCOV coverage report for CI to upload to codecov.io
+ci-coverage pg_ver=default_pg_ver: env-info
+    rm -rf {{quote(parent_directory(coverage_lcov))}}
+    mkdir -p {{quote(parent_directory(coverage_lcov))}}
+    {{just}} _coverage {{pg_ver}} --lcov --output-path {{quote(coverage_lcov)}}
 
-# Run all tests as expected by CI
-ci-test: env-info test-fmt clippy check test && assert-git-is-clean
+# Run formatting, linting, and compile checks as expected by CI
+ci-lint pg_ver=default_pg_ver: env-info test-fmt (clippy pg_ver) (check pg_ver)
 
 # Clean all build artifacts
 clean:
     cargo clean
 
-# Run cargo clippy to lint the code
-clippy *args:
-    cargo clippy --workspace --all-targets {{args}}
+# Run cargo clippy for a PG version
+clippy pg_ver=default_pg_ver:
+    cargo clippy --workspace --all-targets --no-default-features --features {{pg_ver}}
 
 # Use psql to connect to a database
-connect:  install-pgrx
+connect: install-pgrx
     cargo pgrx connect
 
-# Generate code coverage report. Will install `cargo llvm-cov` if missing.
-coverage *args='--no-clean --open':  (cargo-install 'cargo-llvm-cov')
-    cargo llvm-cov --workspace --all-targets --include-build-script {{args}}
+# Generate and open the HTML coverage report
+coverage:  (_coverage default_pg_ver '--open')
+
+# Clean, collect, and aggregate coverage using the requested report arguments
+_coverage pg_ver=default_pg_ver *report_args:  (cargo-install 'cargo-llvm-cov')
+    cargo llvm-cov clean --workspace
+    cargo llvm-cov --no-report --workspace --all-targets --no-default-features --features {{pg_ver}}
+    cargo llvm-cov report --include-build-script {{report_args}}
 
 # Build and open code documentation
 docs *args='--open':
@@ -63,7 +73,7 @@ docs *args='--open':
 # Print environment info
 env-info:
     @echo "Running for '{{main_crate}}' crate {{if ci_mode == '1' {'in CI mode'} else {'in dev mode'} }} on {{os()}} / {{arch()}}"
-    @echo "PWD $(pwd)"
+    @echo "PWD {{justfile_directory()}}"
     {{just}} --version
     rustc --version
     cargo --version
@@ -90,41 +100,92 @@ fmt-toml *args:  (cargo-install 'cargo-sort')
 
 # Get a package field from the metadata
 get-crate-field field package=main_crate:  (assert-cmd 'jq')
-    cargo metadata --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}} // error("Field \"{{field}}\" is missing in Cargo.toml for package {{package}}")'
-
-# Get the minimum supported Rust version (MSRV) for the crate
-get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
+    @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}} // error("Field \"{{field}}\" is missing in Cargo.toml for package {{package}}")'
 
 # (Re-)initializing PGRX with all available PostgreSQL versions
-init:  install-pgrx
+init: install-pgrx
     cargo pgrx init
 
 install-pgrx:
     {{just}} cargo-install cargo-pgrx '' --version "$({{just}} print-pgrx-version)"
 
-# Find the minimum supported Rust version (MSRV) using cargo-msrv extension, and update Cargo.toml
-msrv:  (cargo-install 'cargo-msrv')
-    cargo msrv find --write-msrv --ignore-lockfile
+# Initialize pgrx for a PG version, optionally using an existing pg_config path
+init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
+        echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected 'pgXX' (for example, pg18)." >&2
+        exit 1
+    fi
+    if cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
+        echo "pgrx already initialized for {{pg_ver}}"
+    elif [ -n "{{pg_config}}" ]; then
+        echo "Initializing pgrx for {{pg_ver}} with {{pg_config}}"
+        cargo pgrx init --{{pg_ver}} {{quote(pg_config)}}
+    else
+        echo "Initializing pgrx for {{pg_ver}} by downloading PostgreSQL"
+        cargo pgrx init --{{pg_ver}}=download
+    fi
 
-# Package extension
-package:  install-pgrx
-    cargo pgrx package
+# Package extension for a given PG version and create a tar.gz (e.g., `just package pg18`)
+package pg_ver=default_pg_ver:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
+        echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected format is 'pgXX' where XX is the major version number (e.g., pg18)." >&2
+        exit 1
+    fi
+    pg_config_path="$(cargo pgrx info pg-config {{pg_ver}})"
+    echo "Packaging {{pg_ver}} with ${pg_config_path}"
+    cargo pgrx package --features {{pg_ver}} --no-default-features --pg-config "${pg_config_path}"
+    pkg_dir="target/release/postile-{{pg_ver}}"
+    if [ ! -d "$pkg_dir" ]; then
+        echo "ERROR: Package directory not found at $pkg_dir"
+        ls -la target/release/ | grep postile || true
+        exit 1
+    fi
+    tar -czf "target/release/postile-{{pg_ver}}.tar.gz" -C "$pkg_dir" .
+    echo "Package created: target/release/postile-{{pg_ver}}.tar.gz"
+
+# Bundle all per-PG package directories for one platform into a release archive
+bundle-platform platform version='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version="{{version}}"
+    if [ -z "$version" ]; then
+        version="$({{just}} get-crate-field version)"
+    fi
+    bundle_name="postile-v${version}-{{platform}}"
+    bundle_dir="target/release/${bundle_name}"
+    rm -rf "$bundle_dir"
+    mkdir -p "$bundle_dir"
+    for pg_ver in {{supported_pg_versions}}; do
+        pkg_dir="target/release/postile-${pg_ver}"
+        if [ ! -d "$pkg_dir" ]; then
+            echo "ERROR: Package directory not found at $pkg_dir" >&2
+            exit 1
+        fi
+        mkdir -p "$bundle_dir/$pg_ver"
+        cp -a "$pkg_dir/." "$bundle_dir/$pg_ver/"
+    done
+    if [[ "{{platform}}" == windows-* ]]; then
+        archive="target/release/${bundle_name}.zip"
+        rm -f "$archive"
+        python -c 'import pathlib, sys, zipfile; archive = pathlib.Path(sys.argv[1]); root = pathlib.Path(sys.argv[2]); zf = zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED); [zf.write(path, path.relative_to(root)) for path in sorted(root.rglob("*")) if path.is_file()]; zf.close()' "$archive" "$bundle_dir"
+    else
+        archive="target/release/${bundle_name}.tar.gz"
+        rm -f "$archive"
+        tar -czf "$archive" -C "$bundle_dir" .
+    fi
+    echo "Bundle created: $archive"
 
 # Print current PGRX version
 @print-pgrx-version:  (assert-cmd 'jq')
-    cargo metadata --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
+    @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
-release *args='':  (cargo-install 'release-plz')
-    release-plz {{args}}
-
-# Check semver compatibility with prior published version. Install it with `cargo install cargo-semver-checks`
-semver *args:  (cargo-install 'cargo-semver-checks')
-    cargo semver-checks {{args}}
-
-# Run all unit and integration tests
-test:  install-pgrx
-    cargo pgrx test
-    cargo test --doc --workspace
+# Test for a specific PG version (e.g., `just test pg18`)
+test pg_ver=default_pg_ver:
+    cargo pgrx test {{pg_ver}}
 
 # Test documentation generation
 test-doc:  (docs '')
@@ -156,11 +217,11 @@ assert-cmd command:
 [private]
 assert-git-is-clean:
     @if [ -n "$(git status --untracked-files --porcelain)" ]; then \
-      >&2 echo "ERROR: git repo is no longer clean. Make sure compilation and tests artifacts are in the .gitignore, and no repo files are modified." ;\
-      >&2 echo "######### git status ##########" ;\
-      git status ;\
-      git --no-pager diff ;\
-      exit 1 ;\
+        >&2 echo "ERROR: git repo is no longer clean. Make sure compilation and tests artifacts are in the .gitignore, and no repo files are modified." ;\
+        >&2 echo "######### git status ##########" ;\
+        git status ;\
+        git --no-pager diff ;\
+        exit 1 ;\
     fi
 
 # Check if a certain Cargo command is installed, and install it if needed
