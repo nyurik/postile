@@ -1,7 +1,40 @@
 mod compression;
 mod pg_funcs;
 
+use pgrx::prelude::*;
+
 ::pgrx::pg_module_magic!(name, version);
+
+#[pg_extern]
+fn hello_postile() -> &'static str {
+    "Hello, postile"
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pg_schema]
+mod tests {
+    use pgrx::prelude::*;
+
+    #[pg_test]
+    fn test_hello_postile() {
+        assert_eq!("Hello, postile", crate::hello_postile());
+    }
+
+}
+
+#[cfg(feature = "pg_bench")]
+#[pg_schema]
+mod benches {
+    use pgrx::prelude::*;
+    use pgrx_bench::{Bencher, black_box};
+
+    #[pg_bench]
+    fn bench_hello_postile(b: &mut Bencher) {
+        b.iter(|| {
+            black_box(crate::hello_postile());
+        });
+    }
+}
 
 /// This module is required by `cargo pgrx test` invocations.
 /// It must be visible at the root of your extension crate.
