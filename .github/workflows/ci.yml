@@ -57,7 +57,7 @@ jobs:
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
-      - if: runner.os != 'Linux'
+      - if: matrix.target.name != 'linux-x86_64' || matrix.pg != 18
         uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall' }
       - uses: actions/cache@v5
