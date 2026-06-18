@@ -72,18 +72,13 @@ jobs:
           execute_install_scripts: true
       - name: Set pg_config path
         run: echo "PG_CONFIG_PATH=/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config" >> "$GITHUB_ENV"
-      - name: Remove cached pgrx data directory
-        run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - name: Initialize pgrx
-        run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
-      - name: Lint
-        run: just ci-lint pg${{ matrix.pg }}
-      - name: Test
-        run: just test pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
+      - run: just ci-lint pg${{ matrix.pg }}
+      - run: just test pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
-      - name: Coverage
-        run: just ci-coverage pg${{ matrix.pg }}
+      - run: just ci-coverage pg${{ matrix.pg }}
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
@@ -169,13 +164,11 @@ jobs:
       - if: runner.os == 'Windows'
         name: Select pgrx-managed PostgreSQL (Windows)
         run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
-      - name: Remove cached pgrx data directory
-        run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
       - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         run: just ci-lint pg${{ matrix.pg }}
-      - name: Test
-        run: just test pg${{ matrix.pg }}
+      - run: just test pg${{ matrix.pg }}
       - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
         uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
