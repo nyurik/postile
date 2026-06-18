@@ -4,8 +4,9 @@
 .DS_Store
 .idea/
 .vscode/
-Cargo.lock
 debug/
+flamegraph*.svg
+perf.data*
 pg_regress/regression.diffs
 pg_regress/regression.out
 pg_regress/results

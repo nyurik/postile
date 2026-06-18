@@ -1,11 +1,12 @@
 #!/usr/bin/env just --justfile
 
-# Define the name of the main crate based on the directory name
-main_crate := file_name(justfile_directory())
+main_crate := 'postile'
 # How to call the current just executable. Note that just_executable() may have `\` in Windows paths, so we need to quote it.
 just := quote(just_executable())
 # cargo-binstall needs a workaround due to caching when used in CI
 binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-telemetry'} else {''}
+# location of the coverage output, used by CI
+coverage_lcov := 'target/llvm-cov/lcov.info'
 # Default PG version to use for commands that require a PG version
 default_pg_ver := 'pg18'
 
@@ -33,11 +34,11 @@ build:
 check:
     cargo check --workspace --all-targets
 
-# Generate code coverage report to upload to codecov.io
+# Generate LCOV coverage report for CI to upload to codecov.io
 ci-coverage: env-info && \
-            (coverage '--codecov --output-path target/llvm-cov/codecov.info')
-    # ATTENTION: the full file path above is used in the CI workflow
-    mkdir -p target/llvm-cov
+        (_coverage '--lcov' '--output-path' coverage_lcov)
+    rm -rf {{quote(parent_directory(coverage_lcov))}}
+    mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
 # Run all tests as expected by CI
 ci-test: env-info test-fmt clippy check test && assert-git-is-clean
@@ -54,9 +55,15 @@ clippy *args:
 connect:  install-pgrx
     cargo pgrx connect
 
-# Generate code coverage report. Will install `cargo llvm-cov` if missing.
-coverage *args='--no-clean --open':  (cargo-install 'cargo-llvm-cov')
-    cargo llvm-cov --workspace --all-targets --include-build-script {{args}}
+# Generate and open the HTML coverage report
+coverage: (_coverage '--open')
+
+# Clean, collect, and aggregate coverage using the requested report arguments
+_coverage *report_args: (cargo-install 'cargo-llvm-cov')
+    cargo llvm-cov clean --workspace
+    cargo llvm-cov --no-report --workspace --all-targets
+    cargo llvm-cov --no-report --example {{bin_name}} --no-default-features --features default_loadable_extension
+    cargo llvm-cov report --include-build-script {{report_args}}
 
 # Build and open code documentation
 docs *args='--open':
@@ -92,10 +99,7 @@ fmt-toml *args:  (cargo-install 'cargo-sort')
 
 # Get a package field from the metadata
 get-crate-field field package=main_crate:  (assert-cmd 'jq')
-    cargo metadata --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}} // error("Field \"{{field}}\" is missing in Cargo.toml for package {{package}}")'
-
-# Get the minimum supported Rust version (MSRV) for the crate
-get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
+    @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}} // error("Field \"{{field}}\" is missing in Cargo.toml for package {{package}}")'
 
 # (Re-)initializing PGRX with all available PostgreSQL versions
 init:  install-pgrx
@@ -135,7 +139,7 @@ package pg_ver=default_pg_ver: install-pgrx
 
 # Print current PGRX version
 @print-pgrx-version:  (assert-cmd 'jq')
-    cargo metadata --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
+    @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
 release *args='':  (cargo-install 'release-plz')
     release-plz {{args}}
