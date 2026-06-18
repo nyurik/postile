@@ -107,7 +107,17 @@ init: install-pgrx
     cargo pgrx init
 
 install-pgrx:
-    {{just}} cargo-install cargo-pgrx '' --version "$({{just}} print-pgrx-version)"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version="$({{just}} print-pgrx-version)"
+    if command -v cargo-pgrx >/dev/null && cargo pgrx --version | grep -q " ${version}$"; then
+        echo "cargo-pgrx ${version} already installed, skipping"
+    else
+        echo "Installing cargo-pgrx ${version}..."
+        set -x
+        cargo install cargo-pgrx --locked --version "${version}" --force
+        { set +x; } 2>/dev/null
+    fi
 
 # Initialize pgrx for a PG version, optionally using an existing pg_config path
 init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
