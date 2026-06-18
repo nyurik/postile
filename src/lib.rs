@@ -19,7 +19,6 @@ mod tests {
     fn test_hello_postile() {
         assert_eq!("Hello, postile", crate::hello_postile());
     }
-
 }
 
 #[cfg(feature = "pg_bench")]
