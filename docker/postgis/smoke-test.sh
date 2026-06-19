@@ -35,7 +35,7 @@ SELECT pt_version();
 DO $$
 BEGIN
     IF (SELECT pt_version()) <> (SELECT extversion FROM pg_extension WHERE extname = 'postile') THEN
-        RAISE EXCEPTION 'pt_version() does not match installed extension version';
+        RAISE EXCEPTION 'pt_version() (%) does not match installed extension version (%)', (SELECT pt_version()), (SELECT extversion FROM pg_extension WHERE extname = 'postile');
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'postgis') THEN
