@@ -4,8 +4,8 @@ mod pg_funcs;
 pgrx::pg_module_magic!(name, version);
 
 #[pgrx::pg_extern]
-fn pt_hello_postile() -> &'static str {
-    "Hello, postile"
+fn pt_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -14,8 +14,8 @@ mod tests {
     use pgrx::prelude::*;
 
     #[pg_test]
-    fn test_hello_postile() {
-        assert_eq!("Hello, postile", crate::pt_hello_postile());
+    fn test_pt_version() {
+        assert_eq!(env!("CARGO_PKG_VERSION"), crate::pt_version());
     }
 }
 
@@ -26,9 +26,9 @@ mod benches {
     use pgrx_bench::{Bencher, black_box};
 
     #[pg_bench]
-    fn bench_hello_postile(b: &mut Bencher) {
+    fn bench_pt_version(b: &mut Bencher) {
         b.iter(|| {
-            black_box(crate::pt_hello_postile());
+            black_box(crate::pt_version());
         });
     }
 }

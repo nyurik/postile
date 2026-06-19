@@ -6,6 +6,23 @@
 
 A PostgreSQL extension with various map tile generation functions.  Some functions could help generating tiles for [Martin tile server](https://maplibre.org/martin/) and similar projects.
 
+## Installation
+
+Use the published PostGIS image with Postile preinstalled. Tags follow the upstream PostGIS image tags; for example, `18-3.6` uses PostgreSQL 18 with PostGIS 3.6.
+
+```bash
+docker run --rm \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5432:5432 \
+  ghcr.io/nyurik/postgis-postile:18-3.6
+```
+
+The image creates the `postile` extension during first database initialization. If you install Postile into another PostgreSQL environment manually, enable it in each database that needs it:
+
+```sql
+CREATE EXTENSION postile;
+```
+
 ## Usage
 
 ```sql

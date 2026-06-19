@@ -1,0 +1,10 @@
+target/*
+!target/release/
+target/release/*
+!target/release/postile-pg*.tar.gz
+.git/
+.cursor/
+.idea/
+.vscode/
+release/
+*.log
