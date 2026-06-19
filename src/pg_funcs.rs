@@ -34,6 +34,7 @@ enum ScalarPropKind {
     Str,
 }
 
+#[derive(Clone)]
 struct ColumnInfo {
     ordinal: usize,
     name: String,
@@ -74,17 +75,26 @@ fn pt_asmlt(
             format!("ST_AsEWKB(t.{}) AS __pt_geom", quote_identifier(&geom_name))
         }
     };
-    let select_list = columns
-        .iter()
-        .map(|column| format!("t.{}", quote_identifier(&column.name)))
-        .chain(std::iter::once(geometry_select))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let table_name = quote_qualified_identifier(table_name.namespace(), table_name.name());
-    let query = format!(
-        "SELECT {select_list} FROM {table_name} AS t WHERE t.{} IS NOT NULL",
-        quote_identifier(&geom_name)
-    );
+    let feature_id_column = feature_id_name.as_deref().map(|feature_id_name| {
+        let column = columns
+            .iter()
+            .find(|column| column.name == feature_id_name)
+            .unwrap_or_else(|| {
+                error!("PT_AsMLT feature_id_name {feature_id_name:?} does not exist")
+            });
+        if !matches!(
+            column.kind,
+            Some(
+                ScalarPropKind::I16
+                    | ScalarPropKind::I32
+                    | ScalarPropKind::U32
+                    | ScalarPropKind::I64
+            )
+        ) {
+            error!("PT_AsMLT feature_id_name must refer to an integer column");
+        }
+        column
+    });
 
     let property_columns = columns
         .iter()
@@ -99,14 +109,42 @@ fn pt_asmlt(
         .map(|column| column.name.clone())
         .collect::<Vec<_>>();
 
+    let mut select_expressions =
+        Vec::with_capacity(property_columns.len() + usize::from(feature_id_column.is_some()) + 1);
+    let mut next_ordinal = 1;
+    let selected_feature_id_column = feature_id_column.map(|column| {
+        select_expressions.push(format!("t.{}", quote_identifier(&column.name)));
+        let mut column = column.clone();
+        column.ordinal = next_ordinal;
+        next_ordinal += 1;
+        column
+    });
+    let selected_property_columns = property_columns
+        .iter()
+        .map(|column| {
+            select_expressions.push(format!("t.{}", quote_identifier(&column.name)));
+            let mut column = (*column).clone();
+            column.ordinal = next_ordinal;
+            next_ordinal += 1;
+            column
+        })
+        .collect::<Vec<_>>();
+    let geometry_ordinal = next_ordinal;
+    select_expressions.push(geometry_select);
+
+    let select_list = select_expressions.join(", ");
+    let table_name = quote_qualified_identifier(table_name.namespace(), table_name.name());
+    let query = format!(
+        "SELECT {select_list} FROM {table_name} AS t WHERE t.{} IS NOT NULL",
+        quote_identifier(&geom_name)
+    );
+
     let features = read_mlt_features(
         &query,
-        columns.len() + 1,
+        geometry_ordinal,
         geometry_kind,
-        &property_columns,
-        feature_id_name
-            .as_deref()
-            .and_then(|name| columns.iter().find(|column| column.name == name)),
+        &selected_property_columns,
+        selected_feature_id_column.as_ref(),
     )
     .unwrap_or_else(|e| error!("PT_AsMLT failed: {e}"));
 
@@ -124,7 +162,7 @@ fn read_mlt_features(
     query: &str,
     geometry_ordinal: usize,
     geometry_kind: GeometryColumnKind,
-    property_columns: &[&ColumnInfo],
+    property_columns: &[ColumnInfo],
     feature_id_column: Option<&ColumnInfo>,
 ) -> Result<Vec<TileFeature>, pgrx::spi::Error> {
     Spi::connect(|client| {
@@ -328,7 +366,7 @@ impl<'a> EwkbReader<'a> {
         }
 
         let geometry_type = if has_z || has_m || type_id & Self::SRID_FLAG != 0 {
-            type_id & 0xff
+            type_id & !(Self::Z_FLAG | Self::M_FLAG | Self::SRID_FLAG)
         } else {
             // EWKB normally uses high-bit flags, but this also accepts ISO WKB Z/M/ZM type ids.
             match type_id / 1000 {
@@ -517,6 +555,13 @@ mod tests {
         bytes
     }
 
+    fn ewkb_point_with_srid(x: f64, y: f64) -> Vec<u8> {
+        let mut bytes = ewkb_header(EwkbReader::SRID_FLAG | 1);
+        bytes.extend_from_slice(&4326_u32.to_le_bytes());
+        ewkb_coord(&mut bytes, x, y);
+        bytes
+    }
+
     fn ewkb_line_string(points: &[(f64, f64)]) -> Vec<u8> {
         let mut bytes = ewkb_header(2);
         bytes.extend_from_slice(&u32::try_from(points.len()).unwrap().to_le_bytes());
@@ -611,6 +656,18 @@ mod tests {
     }
 
     #[pg_test]
+    fn test_ewkb_flags_preserve_full_geometry_type() {
+        let point = parse_ewkb_geometry(&ewkb_point_with_srid(10.0, 20.0));
+        assert!(matches!(point, Geometry::Point(_)));
+
+        let unsupported_type = 300;
+        let mut bytes = ewkb_header(EwkbReader::SRID_FLAG | unsupported_type);
+        bytes.extend_from_slice(&4326_u32.to_le_bytes());
+        let err = EwkbReader::new(&bytes).read_geometry().unwrap_err();
+        assert_eq!(err, "unsupported geometry type 300");
+    }
+
+    #[pg_test]
     fn test_pt_gzip() {
         gzip_test(None, None);
         gzip_test(None, Some(5));
@@ -658,5 +715,28 @@ VALUES (1, point(10, 20), 'one', 7), (2, point(30, 40), 'two', 9)",
         .unwrap();
 
         assert!(!tile.is_empty());
+    }
+
+    #[pg_test(error = "PT_AsMLT feature_id_name \"missing_id\" does not exist")]
+    fn test_pt_asmlt_rejects_unknown_feature_id() {
+        Spi::run(
+            "
+CREATE TEMP TABLE pt_asmlt_missing_feature_id_test (
+    id bigint,
+    geom point
+)",
+        )
+        .unwrap();
+        Spi::run(
+            "
+INSERT INTO pt_asmlt_missing_feature_id_test (id, geom)
+VALUES (1, point(10, 20))",
+        )
+        .unwrap();
+
+        Spi::get_one::<&[u8]>(
+            "SELECT PT_AsMLT('pt_asmlt_missing_feature_id_test'::regclass, 'test_layer', 4096, 'geom', 'missing_id')",
+        )
+        .unwrap();
     }
 }
