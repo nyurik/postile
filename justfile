@@ -186,7 +186,7 @@ bundle-platform platform version='':
     echo "Bundle created: $archive"
 
 # Print current PGRX version
-@print-pgrx-version:  (assert-cmd 'jq')
+print-pgrx-version:  (assert-cmd 'jq')
     @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
 # Test for a specific PG version (e.g., `just test pg18`)

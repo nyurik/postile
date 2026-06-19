@@ -41,27 +41,25 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: taiki-e/install-action@v2
+        with: { tool: 'just,cargo-binstall' }
       - name: Read pgrx version
         id: pgrx-version
-        run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")')"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(just print-pgrx-version)" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}
+          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ steps.pgrx-version.outputs.value }}
           cache-on-failure: true
           cache-bin: false
       - uses: taiki-e/cache-cargo-install-action@v3
         with:
-          tool: cargo-pgrx@${{ steps.pgrx-version.outputs.version }}
-      - uses: taiki-e/install-action@v2
-        with: { tool: 'just,cargo-binstall' }
+          tool: cargo-pgrx@${{ steps.pgrx-version.outputs.value }}
       - uses: actions/cache@v5
         with:
           path: |
             ~/.pgrx/config.toml
             ~/.pgrx/${{ matrix.pg }}.*
-          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
+          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ steps.pgrx-version.outputs.value }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
       - if: runner.os == 'Linux'
         name: Configure PGDG apt repository
