@@ -47,6 +47,7 @@ enum GeometryColumnKind {
     Ewkb,
 }
 
+#[allow(clippy::needless_pass_by_value)]
 #[pg_extern]
 fn pt_asmlt(
     table_name: PgRelation,
