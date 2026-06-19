@@ -19,3 +19,6 @@ indent_size = unset
 
 [*.lock]
 indent_size = unset
+
+[Dockerfile]
+indent_size = unset
