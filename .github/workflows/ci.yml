@@ -21,11 +21,13 @@ defaults:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   test:
     name: ${{ matrix.target.name }} pg${{ matrix.pg }}
+    permissions:
+      contents: read
+      packages: write
     runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false

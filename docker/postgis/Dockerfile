@@ -30,7 +30,7 @@ RUN set -eux; \
     rm /tmp/postile.tar.gz; \
     install -m 755 -D "$(find /tmp/postile -type f -name 'postile.so' -print -quit)" "$(pg_config --pkglibdir)/postile.so"; \
     install -m 644 -D "$(find /tmp/postile -type f -name 'postile.control' -print -quit)" "$(pg_config --sharedir)/extension/postile.control"; \
-    find /tmp/postile -type f -name 'postile--*.sql' -exec install -m 644 -D {} "$(pg_config --sharedir)/extension/" \;; \
+    find /tmp/postile -type f -name 'postile--*.sql' -exec install -m 644 -t "$(pg_config --sharedir)/extension" {} \;; \
     rm -rf /tmp/postile; \
     test -f "$(pg_config --pkglibdir)/postile.so"; \
     test -f "$(pg_config --sharedir)/extension/postile.control"; \
