@@ -26,16 +26,15 @@ pg_bench = ["dep:pgrx-bench"]
 [dependencies]
 brotli = ">5, <9"
 flate2 = "1"
-mlt-core = "0.11.1"
-pgrx = "=0.18.1"
+mlt-core = "0.12.0"
+pgrx = "0.18.1"
 
 [dependencies.pgrx-bench]
 version = "=0.18.1"
 optional = true
 
 [dev-dependencies]
-[dev-dependencies.pgrx-tests]
-version = "=0.18.1"
+pgrx-tests= "0.18.1"
 
 [profile.dev]
 panic = "unwind"

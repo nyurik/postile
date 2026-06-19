@@ -2,7 +2,7 @@ use mlt_core::encoder::EncoderConfig;
 use mlt_core::geo_types::{
     Coord, Geometry, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
-use mlt_core::{PropValue, TileFeature, TileLayer};
+use mlt_core::{PropKind, PropValue, TileLayer};
 use pgrx::{PgRelation, Spi, default, error, name_data_to_str, pg_extern, pg_sys};
 
 use crate::compression;
@@ -22,24 +22,25 @@ fn pt_brotli(data: &[u8]) -> Vec<u8> {
     compression::pt_brotli(data).unwrap_or_else(|e| error!("pt_brotli failed: {}", e.to_string()))
 }
 
-#[derive(Clone, Copy)]
-enum ScalarPropKind {
-    Bool,
-    I16,
-    I32,
-    U32,
-    I64,
-    F32,
-    F64,
-    Str,
-}
-
 #[derive(Clone)]
 struct ColumnInfo {
     ordinal: usize,
     name: String,
     oid: pg_sys::Oid,
-    kind: Option<ScalarPropKind>,
+    kind: Option<PropKind>,
+}
+
+struct SelectedColumns {
+    select_expressions: Vec<String>,
+    property_columns: Vec<ColumnInfo>,
+    feature_id_column: Option<ColumnInfo>,
+    geometry_ordinal: usize,
+}
+
+struct MltFeatureRow {
+    id: Option<u64>,
+    geometry: Geometry<i32>,
+    properties: Vec<PropValue>,
 }
 
 #[derive(Clone, Copy)]
@@ -75,7 +76,69 @@ fn pt_asmlt(
             format!("ST_AsEWKB(t.{}) AS __pt_geom", quote_identifier(&geom_name))
         }
     };
-    let feature_id_column = feature_id_name.as_deref().map(|feature_id_name| {
+    let selected_columns = select_columns(
+        &columns,
+        &geom_name,
+        feature_id_name.as_deref(),
+        geometry_select,
+    );
+
+    let select_list = selected_columns.select_expressions.join(", ");
+    let table_name = quote_qualified_identifier(table_name.namespace(), table_name.name());
+    let query = format!(
+        "SELECT {select_list} FROM {table_name} AS t WHERE t.{} IS NOT NULL",
+        quote_identifier(&geom_name)
+    );
+
+    let mut layer = TileLayer::builder(name, extent)
+        .unwrap_or_else(|e| error!("PT_AsMLT failed to create layer: {e}"));
+    let property_keys = selected_columns
+        .property_columns
+        .iter()
+        .map(|column| {
+            layer
+                .add_property(
+                    column.name.clone(),
+                    column.kind.expect("property columns have scalar kinds"),
+                )
+                .unwrap_or_else(|e| error!("PT_AsMLT failed to add property: {e}"))
+        })
+        .collect::<Vec<_>>();
+
+    for row in read_mlt_features(
+        &query,
+        selected_columns.geometry_ordinal,
+        geometry_kind,
+        &selected_columns.property_columns,
+        selected_columns.feature_id_column.as_ref(),
+    )
+    .unwrap_or_else(|e| error!("PT_AsMLT failed: {e}"))
+    {
+        let mut feature = layer.feature(row.geometry);
+        feature.id(row.id);
+        for (key, property) in property_keys.iter().zip(row.properties) {
+            feature
+                .property(*key, property)
+                .unwrap_or_else(|e| error!("PT_AsMLT failed to set property: {e}"));
+        }
+        feature
+            .finish()
+            .unwrap_or_else(|e| error!("PT_AsMLT failed to add feature: {e}"));
+    }
+
+    layer
+        .finish()
+        .encode(EncoderConfig::default())
+        .unwrap_or_else(|e| error!("PT_AsMLT failed: {e}"))
+}
+
+fn select_columns(
+    columns: &[ColumnInfo],
+    geom_name: &str,
+    feature_id_name: Option<&str>,
+    geometry_select: String,
+) -> SelectedColumns {
+    let feature_id_column = feature_id_name.map(|feature_id_name| {
         let column = columns
             .iter()
             .find(|column| column.name == feature_id_name)
@@ -84,12 +147,7 @@ fn pt_asmlt(
             });
         if !matches!(
             column.kind,
-            Some(
-                ScalarPropKind::I16
-                    | ScalarPropKind::I32
-                    | ScalarPropKind::U32
-                    | ScalarPropKind::I64
-            )
+            Some(PropKind::I32 | PropKind::U32 | PropKind::I64)
         ) {
             error!("PT_AsMLT feature_id_name must refer to an integer column");
         }
@@ -100,26 +158,22 @@ fn pt_asmlt(
         .iter()
         .filter(|column| {
             column.name != geom_name
-                && feature_id_name.as_deref() != Some(column.name.as_str())
+                && feature_id_name != Some(column.name.as_str())
                 && column.kind.is_some()
         })
-        .collect::<Vec<_>>();
-    let property_names = property_columns
-        .iter()
-        .map(|column| column.name.clone())
         .collect::<Vec<_>>();
 
     let mut select_expressions =
         Vec::with_capacity(property_columns.len() + usize::from(feature_id_column.is_some()) + 1);
     let mut next_ordinal = 1;
-    let selected_feature_id_column = feature_id_column.map(|column| {
+    let feature_id_column = feature_id_column.map(|column| {
         select_expressions.push(format!("t.{}", quote_identifier(&column.name)));
         let mut column = column.clone();
         column.ordinal = next_ordinal;
         next_ordinal += 1;
         column
     });
-    let selected_property_columns = property_columns
+    let property_columns = property_columns
         .iter()
         .map(|column| {
             select_expressions.push(format!("t.{}", quote_identifier(&column.name)));
@@ -132,30 +186,12 @@ fn pt_asmlt(
     let geometry_ordinal = next_ordinal;
     select_expressions.push(geometry_select);
 
-    let select_list = select_expressions.join(", ");
-    let table_name = quote_qualified_identifier(table_name.namespace(), table_name.name());
-    let query = format!(
-        "SELECT {select_list} FROM {table_name} AS t WHERE t.{} IS NOT NULL",
-        quote_identifier(&geom_name)
-    );
-
-    let features = read_mlt_features(
-        &query,
+    SelectedColumns {
+        select_expressions,
+        property_columns,
+        feature_id_column,
         geometry_ordinal,
-        geometry_kind,
-        &selected_property_columns,
-        selected_feature_id_column.as_ref(),
-    )
-    .unwrap_or_else(|e| error!("PT_AsMLT failed: {e}"));
-
-    TileLayer {
-        name,
-        extent,
-        property_names,
-        features,
     }
-    .encode(EncoderConfig::default())
-    .unwrap_or_else(|e| error!("PT_AsMLT failed: {e}"))
 }
 
 fn read_mlt_features(
@@ -164,7 +200,7 @@ fn read_mlt_features(
     geometry_kind: GeometryColumnKind,
     property_columns: &[ColumnInfo],
     feature_id_column: Option<&ColumnInfo>,
-) -> Result<Vec<TileFeature>, pgrx::spi::Error> {
+) -> Result<Vec<MltFeatureRow>, pgrx::spi::Error> {
     Spi::connect(|client| {
         let tuples = client.select(query, None, &[])?;
         let mut features = Vec::with_capacity(tuples.len());
@@ -175,8 +211,7 @@ fn read_mlt_features(
                 .iter()
                 .map(|column| read_property(&tuple, column))
                 .collect::<Result<Vec<_>, _>>()?;
-
-            features.push(TileFeature {
+            features.push(MltFeatureRow {
                 id,
                 geometry,
                 properties,
@@ -213,35 +248,34 @@ fn table_columns(table: &PgRelation, geom_name: &str) -> Vec<ColumnInfo> {
     columns
 }
 
-fn scalar_prop_kind(oid: pg_sys::Oid) -> Option<ScalarPropKind> {
+fn scalar_prop_kind(oid: pg_sys::Oid) -> Option<PropKind> {
     match oid {
-        pg_sys::BOOLOID => Some(ScalarPropKind::Bool),
-        pg_sys::INT2OID => Some(ScalarPropKind::I16),
-        pg_sys::INT4OID => Some(ScalarPropKind::I32),
-        pg_sys::OIDOID => Some(ScalarPropKind::U32),
-        pg_sys::INT8OID => Some(ScalarPropKind::I64),
-        pg_sys::FLOAT4OID => Some(ScalarPropKind::F32),
-        pg_sys::FLOAT8OID => Some(ScalarPropKind::F64),
-        pg_sys::TEXTOID | pg_sys::VARCHAROID | pg_sys::BPCHAROID => Some(ScalarPropKind::Str),
+        pg_sys::BOOLOID => Some(PropKind::Bool),
+        pg_sys::INT2OID | pg_sys::INT4OID => Some(PropKind::I32),
+        pg_sys::OIDOID => Some(PropKind::U32),
+        pg_sys::INT8OID => Some(PropKind::I64),
+        pg_sys::FLOAT4OID => Some(PropKind::F32),
+        pg_sys::FLOAT8OID => Some(PropKind::F64),
+        pg_sys::TEXTOID | pg_sys::VARCHAROID | pg_sys::BPCHAROID => Some(PropKind::Str),
         _ => None,
     }
 }
 
 fn read_feature_id(tuple: &pgrx::spi::SpiHeapTupleData<'_>, column: &ColumnInfo) -> Option<u64> {
-    match column.kind {
-        Some(ScalarPropKind::I16) => tuple
+    match column.oid {
+        pg_sys::INT2OID => tuple
             .get::<i16>(column.ordinal)
             .unwrap_or_else(|e| error!("PT_AsMLT failed to read feature id: {e}"))
             .and_then(|value| u64::try_from(value).ok()),
-        Some(ScalarPropKind::I32) => tuple
+        pg_sys::INT4OID => tuple
             .get::<i32>(column.ordinal)
             .unwrap_or_else(|e| error!("PT_AsMLT failed to read feature id: {e}"))
             .and_then(|value| u64::try_from(value).ok()),
-        Some(ScalarPropKind::U32) => tuple
+        pg_sys::OIDOID => tuple
             .get::<pg_sys::Oid>(column.ordinal)
             .unwrap_or_else(|e| error!("PT_AsMLT failed to read feature id: {e}"))
             .map(|value| u64::from(value.to_u32())),
-        Some(ScalarPropKind::I64) => tuple
+        pg_sys::INT8OID => tuple
             .get::<i64>(column.ordinal)
             .unwrap_or_else(|e| error!("PT_AsMLT failed to read feature id: {e}"))
             .and_then(|value| u64::try_from(value).ok()),
@@ -253,22 +287,23 @@ fn read_property(
     tuple: &pgrx::spi::SpiHeapTupleData<'_>,
     column: &ColumnInfo,
 ) -> Result<PropValue, pgrx::spi::Error> {
-    Ok(
-        match column.kind.expect("property columns have scalar kinds") {
-            ScalarPropKind::Bool => PropValue::Bool(tuple.get::<bool>(column.ordinal)?),
-            ScalarPropKind::I16 => PropValue::I32(tuple.get::<i16>(column.ordinal)?.map(i32::from)),
-            ScalarPropKind::I32 => PropValue::I32(tuple.get::<i32>(column.ordinal)?),
-            ScalarPropKind::U32 => PropValue::U32(
-                tuple
-                    .get::<pg_sys::Oid>(column.ordinal)?
-                    .map(pg_sys::Oid::to_u32),
-            ),
-            ScalarPropKind::I64 => PropValue::I64(tuple.get::<i64>(column.ordinal)?),
-            ScalarPropKind::F32 => PropValue::F32(tuple.get::<f32>(column.ordinal)?),
-            ScalarPropKind::F64 => PropValue::F64(tuple.get::<f64>(column.ordinal)?),
-            ScalarPropKind::Str => PropValue::Str(tuple.get::<String>(column.ordinal)?),
-        },
-    )
+    Ok(match column.oid {
+        pg_sys::BOOLOID => PropValue::Bool(tuple.get::<bool>(column.ordinal)?),
+        pg_sys::INT2OID => PropValue::I32(tuple.get::<i16>(column.ordinal)?.map(i32::from)),
+        pg_sys::INT4OID => PropValue::I32(tuple.get::<i32>(column.ordinal)?),
+        pg_sys::OIDOID => PropValue::U32(
+            tuple
+                .get::<pg_sys::Oid>(column.ordinal)?
+                .map(pg_sys::Oid::to_u32),
+        ),
+        pg_sys::INT8OID => PropValue::I64(tuple.get::<i64>(column.ordinal)?),
+        pg_sys::FLOAT4OID => PropValue::F32(tuple.get::<f32>(column.ordinal)?),
+        pg_sys::FLOAT8OID => PropValue::F64(tuple.get::<f64>(column.ordinal)?),
+        pg_sys::TEXTOID | pg_sys::VARCHAROID | pg_sys::BPCHAROID => {
+            PropValue::Str(tuple.get::<String>(column.ordinal)?)
+        }
+        _ => unreachable!("property columns have scalar kinds"),
+    })
 }
 
 fn read_geometry(
@@ -593,18 +628,9 @@ mod tests {
     }
 
     fn assert_mlt_encodes(geometry: Geometry<i32>) {
-        let tile = TileLayer {
-            name: "test".to_string(),
-            extent: 4096,
-            property_names: vec![],
-            features: vec![TileFeature {
-                id: None,
-                geometry,
-                properties: vec![],
-            }],
-        }
-        .encode(EncoderConfig::default())
-        .unwrap();
+        let mut layer = TileLayer::builder("test", 4096).unwrap();
+        layer.feature(geometry).finish().unwrap();
+        let tile = layer.finish().encode(EncoderConfig::default()).unwrap();
         assert!(!tile.is_empty());
     }
 
