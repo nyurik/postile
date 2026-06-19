@@ -98,6 +98,10 @@ fmt-toml *args:  (cargo-install 'cargo-sort')
 get-crate-field field package=main_crate:  (assert-cmd 'jq')
     @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .{{field}} // error("Field \"{{field}}\" is missing in Cargo.toml for package {{package}}")'
 
+# Print current PGRX version
+get-pgrx-version package=main_crate:  (assert-cmd 'jq')
+    @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "{{package}}")) | first | .dependencies | map(select(.name == "pgrx")) | first // error("Value \"dependencies/pgrx\" is missing in Cargo.toml for package {{package}}") | .req | ltrimstr("=")'
+
 # (Re-)initializing PGRX with all available PostgreSQL versions
 init: install-pgrx
     cargo pgrx init
@@ -105,7 +109,7 @@ init: install-pgrx
 install-pgrx:
     #!/usr/bin/env bash
     set -euo pipefail
-    version="$({{just}} print-pgrx-version)"
+    version="$({{just}} get-pgrx-version)"
     if command -v cargo-pgrx >/dev/null && cargo pgrx --version | grep -q " ${version}$"; then
         echo "cargo-pgrx ${version} already installed, skipping"
     else
@@ -184,10 +188,6 @@ bundle-platform platform version='':
         tar -czf "$archive" -C "$bundle_dir" .
     fi
     echo "Bundle created: $archive"
-
-# Print current PGRX version
-print-pgrx-version:  (assert-cmd 'jq')
-    @cargo metadata --no-deps --format-version 1 | jq -e -r '.packages | map(select(.name == "postile")) | first | .dependencies | map(select(.name == "pgrx")) | first | .req | ltrimstr("=")'
 
 # Test for a specific PG version (e.g., `just test pg18`)
 test pg_ver=default_pg_ver:

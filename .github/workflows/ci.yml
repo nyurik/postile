@@ -19,6 +19,10 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   test:
     name: ${{ matrix.target.name }} pg${{ matrix.pg }}
@@ -45,13 +49,33 @@ jobs:
       - name: Set workflow variables
         id: variables
         run: |
-          pgrx_version="$(just print-pgrx-version)"
+          pgrx_version="$(just get-pgrx-version)"
+          postile_version="$(just get-crate-field version)"
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/postgis-postile"
+          postgis_tag=""
+          publish_image=false
+
+          case "${{ matrix.pg }}" in
+            14) postgis_tag="14-3.5" ;;
+            15) postgis_tag="15-3.5" ;;
+            16) postgis_tag="16-3.5" ;;
+            17) postgis_tag="17-3.5" ;;
+            18) postgis_tag="18-3.6" ;;
+          esac
+
+          if [[ "${{ github.event_name }}" != 'pull_request' && "${{ matrix.target.name }}" == 'linux-x86_64' && -n "$postgis_tag" ]]; then
+            publish_image=true
+          fi
+
           echo "pgrx_version=${pgrx_version}" >> "$GITHUB_OUTPUT"
+          echo "postile_version=${postile_version}" >> "$GITHUB_OUTPUT"
           echo "pg_feature=pg${{ matrix.pg }}" >> "$GITHUB_OUTPUT"
           echo "cache_key=${{ matrix.target.name }}-pg${{ matrix.pg }}-${pgrx_version}" >> "$GITHUB_OUTPUT"
           echo "run_ci_extras=${{ matrix.target.name == 'linux-x86_64' && matrix.pg == 18 }}" >> "$GITHUB_OUTPUT"
-          echo "should_package=${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'release' && github.event.action == 'published') }}" >> "$GITHUB_OUTPUT"
-          echo "should_upload_package=${{ (github.event_name == 'release' && github.event.action == 'published') || (matrix.target.name == 'linux-x86_64' && github.event_name == 'push' && github.ref == 'refs/heads/main') }}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image}:${postgis_tag}" >> "$GITHUB_OUTPUT"
+          echo "postgis_tag=${postgis_tag}" >> "$GITHUB_OUTPUT"
+          echo "publish_image=${publish_image}" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ steps.variables.outputs.cache_key }}
@@ -124,58 +148,48 @@ jobs:
           files: target/llvm-cov/lcov.info
       - if: steps.variables.outputs.run_ci_extras == 'true'
         run: just assert-git-is-clean
-      - if: steps.variables.outputs.should_package == 'true'
+      - if: steps.variables.outputs.publish_image == 'true'
+        name: Build extension archive for image
         run: just package ${{ steps.variables.outputs.pg_feature }}
-      - if: steps.variables.outputs.should_upload_package == 'true'
-        uses: actions/upload-artifact@v7
+      - if: steps.variables.outputs.publish_image == 'true'
+        uses: docker/setup-buildx-action@v4
+      - if: steps.variables.outputs.publish_image == 'true'
+        uses: docker/login-action@v4
         with:
-          name: package-${{ matrix.target.name }}-pg${{ matrix.pg }}
-          path: target/release/postile-pg${{ matrix.pg }}.tar.gz
-          if-no-files-found: error
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.variables.outputs.publish_image == 'true'
+        name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/postgis/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: ${{ steps.variables.outputs.image_tag }}
+          build-args: |
+            BASE_IMAGE=postgis/postgis:${{ steps.variables.outputs.postgis_tag }}
+            PG_MAJOR=${{ matrix.pg }}
+            POSTILE_VERSION=${{ steps.variables.outputs.postile_version }}
+            VCS_REF=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.variables.outputs.postile_version }}
+            org.opencontainers.image.base.name=postgis/postgis:${{ steps.variables.outputs.postgis_tag }}
+          cache-from: type=gha,scope=postgis-${{ steps.variables.outputs.postgis_tag }}
+          cache-to: type=gha,mode=max,scope=postgis-${{ steps.variables.outputs.postgis_tag }}
 
-  bundle:
-    name: Bundle ${{ matrix.target }}
-    needs: [ test ]
-    if: github.event_name == 'release' && github.event.action == 'published'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [ linux-x86_64, linux-aarch64, macos-x86_64, macos-aarch64, windows-x86_64 ]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2
-        with: { tool: just }
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: package-${{ matrix.target }}-pg*
-          path: target/release/packages
-      - name: Arrange package directories
-        run: |
-          set -euo pipefail
-          for pg in 13 14 15 16 17 18; do
-            src="target/release/packages/package-${{ matrix.target }}-pg${pg}"
-            archive="${src}/postile-pg${pg}.tar.gz"
-            dst="target/release/postile-pg${pg}"
-            if [ ! -f "$archive" ]; then
-              echo "Missing package artifact: $archive" >&2
-              exit 1
-            fi
-            rm -rf "$dst"
-            mkdir -p "$dst"
-            tar -xzf "$archive" -C "$dst"
-          done
-      - run: just bundle-platform ${{ matrix.target }}
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-bundle-${{ matrix.target }}
-          path: target/release/postile-v*-${{ matrix.target }}.*
-          if-no-files-found: error
+      - if: steps.variables.outputs.publish_image == 'true'
+        run: bash docker/postgis/smoke-test.sh "${{ steps.variables.outputs.image_tag }}"
+      - if: steps.variables.outputs.publish_image == 'true'
+        run: docker push "${{ steps.variables.outputs.image_tag }}"
 
   # This job checks if any of the previous jobs failed or were canceled.
   # This approach also allows some jobs to be skipped if they are not needed.
   ci-passed:
-    needs: [ test, bundle ]
+    needs: [ test ]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -183,30 +197,3 @@ jobs:
         run: echo "${{ toJSON(needs) }}"
       - if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
-
-  # Upload the bundles built by this release workflow to the published GitHub Release.
-  upload-release:
-    name: Upload to Release
-    needs: [ bundle ]
-    if: github.event_name == 'release' && github.event.action == 'published'
-    runs-on: ubuntu-latest
-    permissions: { actions: read, contents: write }
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: release-bundle-*
-          path: release
-      - name: Upload packages to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          shopt -s nullglob globstar
-          assets=(release/**/*.tar.gz release/**/*.zip)
-          if [ "${#assets[@]}" -eq 0 ]; then
-            echo "No release bundle assets were downloaded." >&2
-            exit 1
-          fi
-          gh release upload "$TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
