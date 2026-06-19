@@ -51,7 +51,8 @@ jobs:
         run: |
           pgrx_version="$(just get-pgrx-version)"
           postile_version="$(just get-crate-field version)"
-          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/postgis-postile"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/postgis-postile"
           postgis_tag=""
           publish_image=false
 
