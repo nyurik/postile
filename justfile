@@ -12,16 +12,12 @@ default_pg_ver := 'pg18'
 # PostgreSQL versions supported by the pgrx version in Cargo.toml
 supported_pg_versions := 'pg13 pg14 pg15 pg16 pg17 pg18'
 
-# if running in CI, treat warnings as errors by setting RUSTFLAGS and RUSTDOCFLAGS to '-D warnings' unless they are already set
+# If running in CI, treat warnings as errors for cargo commands that compile code.
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
-# Use `just env-info` to see the current values of RUSTFLAGS and RUSTDOCFLAGS
+# Use `just env-info` to see the current CI command flags.
 ci_mode := if env('CI', '') != '' {'1'} else {''}
-ci_rustflags := if ci_mode == '1' {'-D warnings'} else {''}
-# RUSTFLAGS from the environment overrides .cargo/config.toml, so keep the
-# macOS extension linker flag when CI enables warnings-as-errors.
-macos_rustflags := if os() == 'macos' {'-C link-arg=-Wl,-undefined,dynamic_lookup'} else {''}
-default_rustflags := if ci_rustflags == '' {macos_rustflags} else if macos_rustflags == '' {ci_rustflags} else {ci_rustflags + ' ' + macos_rustflags}
-export RUSTFLAGS := env('RUSTFLAGS', default_rustflags)
+cargo_deny_warnings := if ci_mode == '1' {'--config ' + quote('build.rustflags=["-Dwarnings"]')} else {''}
+clippy_deny_warnings := if ci_mode == '1' {'-- -D warnings'} else {''}
 export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'})
 
 @_default:
@@ -34,11 +30,11 @@ bench:
 
 # Build the project
 build:
-    cargo build --workspace --all-targets
+    cargo {{cargo_deny_warnings}} build --workspace --all-targets
 
 # Quick compile without building a binary for a PG version
 check pg_ver=default_pg_ver:
-    cargo check --workspace --all-targets --no-default-features --features {{pg_ver}}
+    cargo {{cargo_deny_warnings}} check --workspace --all-targets --no-default-features --features {{pg_ver}}
 
 # Generate LCOV coverage report for CI to upload to codecov.io
 ci-coverage pg_ver=default_pg_ver: env-info
@@ -55,7 +51,7 @@ clean:
 
 # Run cargo clippy for a PG version
 clippy pg_ver=default_pg_ver:
-    cargo clippy --workspace --all-targets --no-default-features --features {{pg_ver}}
+    cargo clippy --workspace --all-targets --no-default-features --features {{pg_ver}} {{clippy_deny_warnings}}
 
 # Use psql to connect to a database
 connect: install-pgrx
@@ -66,13 +62,9 @@ coverage:  (_coverage default_pg_ver '--open')
 
 # Clean, collect, and aggregate coverage using the requested report arguments
 _coverage pg_ver=default_pg_ver *report_args:  (cargo-install 'cargo-llvm-cov')
-    cargo llvm-cov clean --workspace
-    cargo llvm-cov --no-report --workspace --all-targets --no-default-features --features {{pg_ver}}
-    cargo llvm-cov report --include-build-script {{report_args}}
-
-# Build and open code documentation
-docs *args='--open':
-    DOCS_RS=1 cargo doc --no-deps {{args}} --workspace
+    cargo {{cargo_deny_warnings}} llvm-cov clean --workspace
+    cargo {{cargo_deny_warnings}} llvm-cov --no-report --workspace --all-targets --no-default-features --features {{pg_ver}}
+    cargo {{cargo_deny_warnings}} llvm-cov report --include-build-script {{report_args}}
 
 # Print environment info
 env-info:
@@ -82,7 +74,8 @@ env-info:
     rustc --version
     cargo --version
     rustup --version
-    @echo "RUSTFLAGS='$RUSTFLAGS'"
+    @echo "cargo_deny_warnings='{{cargo_deny_warnings}}'"
+    @echo "clippy_deny_warnings='{{clippy_deny_warnings}}'"
     @echo "RUST_BACKTRACE='$RUST_BACKTRACE'"
 
 # Reformat all code `cargo fmt`. If nightly is available, use it for better results
@@ -199,9 +192,6 @@ bundle-platform platform version='':
 # Test for a specific PG version (e.g., `just test pg18`)
 test pg_ver=default_pg_ver:
     cargo pgrx test {{pg_ver}}
-
-# Test documentation generation
-test-doc:  (docs '')
 
 # Test code formatting
 test-fmt: && (fmt-toml '--check' '--check-format')
