@@ -25,8 +25,13 @@ COPY target/release/postile-pg${PG_MAJOR}.tar.gz /tmp/postile.tar.gz
 COPY --chmod=755 docker/postgis/initdb-postile.sh /docker-entrypoint-initdb.d/20_postile.sh
 
 RUN set -eux; \
-    tar -xzf /tmp/postile.tar.gz -C /; \
+    mkdir -p /tmp/postile; \
+    tar -xzf /tmp/postile.tar.gz -C /tmp/postile; \
     rm /tmp/postile.tar.gz; \
+    install -m 755 -D "$(find /tmp/postile -type f -name 'postile.so' -print -quit)" "$(pg_config --pkglibdir)/postile.so"; \
+    install -m 644 -D "$(find /tmp/postile -type f -name 'postile.control' -print -quit)" "$(pg_config --sharedir)/extension/postile.control"; \
+    find /tmp/postile -type f -name 'postile--*.sql' -exec install -m 644 -D {} "$(pg_config --sharedir)/extension/" \;; \
+    rm -rf /tmp/postile; \
     test -f "$(pg_config --pkglibdir)/postile.so"; \
     test -f "$(pg_config --sharedir)/extension/postile.control"; \
     ls "$(pg_config --sharedir)"/extension/postile--*.sql >/dev/null

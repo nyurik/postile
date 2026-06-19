@@ -6,5 +6,5 @@ export PGUSER="$POSTGRES_USER"
 
 for DB in template_postgis "$POSTGRES_DB"; do
     echo "Loading Postile extension into $DB"
-    "${psql[@]}" --dbname="$DB" --command='CREATE EXTENSION IF NOT EXISTS postile;'
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --no-password --no-psqlrc --dbname="$DB" --command='CREATE EXTENSION IF NOT EXISTS postile;'
 done

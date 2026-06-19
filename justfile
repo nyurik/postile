@@ -124,7 +124,7 @@ init-pg pg_ver=default_pg_ver pg_config='': install-pgrx
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
-        echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected 'pgXX' (for example, pg18)." >&2
+        >&2 echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected 'pgXX' (for example, pg18)."
         exit 1
     fi
     if cargo pgrx info pg-config {{pg_ver}} &>/dev/null; then
@@ -142,7 +142,7 @@ package pg_ver=default_pg_ver:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ ! "{{pg_ver}}" =~ ^pg[0-9]+$ ]]; then
-        echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected format is 'pgXX' where XX is the major version number (e.g., pg18)." >&2
+        >&2 echo "ERROR: Invalid PG version format '{{pg_ver}}'. Expected format is 'pgXX' where XX is the major version number (e.g., pg18)."
         exit 1
     fi
     pg_config_path="$(cargo pgrx info pg-config {{pg_ver}})"
@@ -156,6 +156,73 @@ package pg_ver=default_pg_ver:
     fi
     tar -czf "target/release/postile-{{pg_ver}}.tar.gz" -C "$pkg_dir" .
     echo "Package created: target/release/postile-{{pg_ver}}.tar.gz"
+
+# Print the default PostGIS image tag for a PG version, or nothing if unsupported
+maybe-postgis-tag pg_ver=default_pg_ver:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{pg_ver}}" in
+        pg14) echo "14-3.5" ;;
+        pg15) echo "15-3.5" ;;
+        pg16) echo "16-3.5" ;;
+        pg17) echo "17-3.5" ;;
+        pg18) echo "18-3.6" ;;
+    esac
+
+# Print the default PostGIS image tag for a supported PG version
+get-postgis-tag pg_ver=default_pg_ver:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag="$({{just}} maybe-postgis-tag {{quote(pg_ver)}})"
+    if [ -z "$tag" ]; then
+        >&2 echo "ERROR: No default PostGIS image tag is configured for {{pg_ver}}."
+        exit 1
+    fi
+    echo "$tag"
+
+# Build the local PostGIS image with Postile installed
+postgis-image pg_ver=default_pg_ver postgis_tag='' image_tag='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pg_ver="{{pg_ver}}"
+    postgis_tag="{{postgis_tag}}"
+    image_tag="{{image_tag}}"
+    if [[ ! "$pg_ver" =~ ^pg[0-9]+$ ]]; then
+        >&2 echo "ERROR: Invalid PG version format '$pg_ver'. Expected format is 'pgXX' where XX is the major version number (e.g., pg18)."
+        exit 1
+    fi
+    pg_major="${pg_ver#pg}"
+    if [ -z "$postgis_tag" ]; then
+        postgis_tag="$({{just}} get-postgis-tag "$pg_ver")"
+    fi
+    if [ -z "$image_tag" ]; then
+        image_tag="postgis-postile:${postgis_tag}"
+    fi
+    {{just}} package "$pg_ver"
+    docker build \
+        --file docker/postgis/Dockerfile \
+        --build-arg "BASE_IMAGE=postgis/postgis:${postgis_tag}" \
+        --build-arg "PG_MAJOR=${pg_major}" \
+        --build-arg "POSTILE_VERSION=$({{just}} get-crate-field version)" \
+        --build-arg "VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo local)" \
+        --tag "$image_tag" \
+        .
+
+# Build and smoke-test the local PostGIS image
+test-postgis-image pg_ver=default_pg_ver postgis_tag='' image_tag='':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pg_ver="{{pg_ver}}"
+    postgis_tag="{{postgis_tag}}"
+    if [ -z "$postgis_tag" ]; then
+        postgis_tag="$({{just}} get-postgis-tag "$pg_ver")"
+    fi
+    image_tag="{{image_tag}}"
+    if [ -z "$image_tag" ]; then
+        image_tag="postgis-postile:${postgis_tag}"
+    fi
+    {{just}} postgis-image "$pg_ver" "$postgis_tag" "$image_tag"
+    bash docker/postgis/smoke-test.sh "$image_tag"
 
 # Bundle all per-PG package directories for one platform into a release archive
 bundle-platform platform version='':
@@ -172,7 +239,7 @@ bundle-platform platform version='':
     for pg_ver in {{supported_pg_versions}}; do
         pkg_dir="target/release/postile-${pg_ver}"
         if [ ! -d "$pkg_dir" ]; then
-            echo "ERROR: Package directory not found at $pkg_dir" >&2
+            >&2 echo "ERROR: Package directory not found at $pkg_dir"
             exit 1
         fi
         mkdir -p "$bundle_dir/$pg_ver"

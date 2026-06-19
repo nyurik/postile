@@ -50,26 +50,16 @@ jobs:
         id: variables
         run: |
           pgrx_version="$(just get-pgrx-version)"
-          postile_version="$(just get-crate-field version)"
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           image="ghcr.io/${owner}/postgis-postile"
-          postgis_tag=""
+          postgis_tag="$(just maybe-postgis-tag pg${{ matrix.pg }})"
           publish_image=false
-
-          case "${{ matrix.pg }}" in
-            14) postgis_tag="14-3.5" ;;
-            15) postgis_tag="15-3.5" ;;
-            16) postgis_tag="16-3.5" ;;
-            17) postgis_tag="17-3.5" ;;
-            18) postgis_tag="18-3.6" ;;
-          esac
 
           if [[ "${{ github.event_name }}" != 'pull_request' && "${{ matrix.target.name }}" == 'linux-x86_64' && -n "$postgis_tag" ]]; then
             publish_image=true
           fi
 
           echo "pgrx_version=${pgrx_version}" >> "$GITHUB_OUTPUT"
-          echo "postile_version=${postile_version}" >> "$GITHUB_OUTPUT"
           echo "pg_feature=pg${{ matrix.pg }}" >> "$GITHUB_OUTPUT"
           echo "cache_key=${{ matrix.target.name }}-pg${{ matrix.pg }}-${pgrx_version}" >> "$GITHUB_OUTPUT"
           echo "run_ci_extras=${{ matrix.target.name == 'linux-x86_64' && matrix.pg == 18 }}" >> "$GITHUB_OUTPUT"
@@ -150,37 +140,14 @@ jobs:
       - if: steps.variables.outputs.run_ci_extras == 'true'
         run: just assert-git-is-clean
       - if: steps.variables.outputs.publish_image == 'true'
-        name: Build extension archive for image
-        run: just package ${{ steps.variables.outputs.pg_feature }}
-      - if: steps.variables.outputs.publish_image == 'true'
-        uses: docker/setup-buildx-action@v4
+        name: Build image
+        run: just postgis-image "${{ steps.variables.outputs.pg_feature }}" "${{ steps.variables.outputs.postgis_tag }}" "${{ steps.variables.outputs.image_tag }}"
       - if: steps.variables.outputs.publish_image == 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - if: steps.variables.outputs.publish_image == 'true'
-        name: Build image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/postgis/Dockerfile
-          platforms: linux/amd64
-          load: true
-          tags: ${{ steps.variables.outputs.image_tag }}
-          build-args: |
-            BASE_IMAGE=postgis/postgis:${{ steps.variables.outputs.postgis_tag }}
-            PG_MAJOR=${{ matrix.pg }}
-            POSTILE_VERSION=${{ steps.variables.outputs.postile_version }}
-            VCS_REF=${{ github.sha }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.variables.outputs.postile_version }}
-            org.opencontainers.image.base.name=postgis/postgis:${{ steps.variables.outputs.postgis_tag }}
-          cache-from: type=gha,scope=postgis-${{ steps.variables.outputs.postgis_tag }}
-          cache-to: type=gha,mode=max,scope=postgis-${{ steps.variables.outputs.postgis_tag }}
 
       - if: steps.variables.outputs.publish_image == 'true'
         run: bash docker/postgis/smoke-test.sh "${{ steps.variables.outputs.image_tag }}"
