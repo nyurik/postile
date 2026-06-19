@@ -20,116 +20,46 @@ defaults:
     shell: bash
 
 jobs:
-  test-pr:
-    name: ${{ matrix.target.name }} pg${{ matrix.pg }}
-    if: |
-      github.event_name == 'pull_request'
-      || (github.event_name == 'workflow_dispatch' && !inputs.full_matrix)
-    runs-on: ${{ matrix.target.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        pg: [ 18 ]
-        target:
-          - name: linux-x86_64
-            os: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            ~/.cargo/bin/cargo-pgrx
-          key: cargo-pgrx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml') }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}
-          cache-on-failure: true
-      - uses: taiki-e/install-action@v2
-        with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
-      - uses: actions/cache@v5
-        with:
-          path: |
-            ~/.pgrx/config.toml
-            ~/.pgrx/${{ matrix.pg }}.*
-          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
-          restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
-      - name: Configure PGDG apt repository
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ca-certificates curl gnupg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
-          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update
-      - name: Install PostgreSQL and build dependencies (Linux)
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: >-
-            build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison
-            libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
-            postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
-          version: ${{ matrix.target.name }}-pg${{ matrix.pg }}-v1
-          execute_install_scripts: true
-      - name: Set pg_config path
-        run: |
-          pg_config_path="/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config"
-          echo "PG_CONFIG_PATH=${pg_config_path}" >> "$GITHUB_ENV"
-          sudo chmod a+rwx "$("${pg_config_path}" --pkglibdir)" "$("${pg_config_path}" --sharedir)/extension"
-      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
-      - run: just ci-lint pg${{ matrix.pg }}
-      - run: just test pg${{ matrix.pg }}
-      - run: just ci-coverage pg${{ matrix.pg }}
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: target/llvm-cov/lcov.info
-      - run: just assert-git-is-clean
-
   test:
     name: ${{ matrix.target.name }} pg${{ matrix.pg }}
-    if: |
-      github.event_name == 'push'
-      || (github.event_name == 'workflow_dispatch' && inputs.full_matrix)
+    if: github.event_name != 'release'
     runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
       matrix:
-        pg: [ 13, 14, 15, 16, 17, 18 ]
+        pg: ${{ fromJSON((github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full_matrix)) && '[18]' || '[13,14,15,16,17,18]') }}
         target:
           - name: linux-x86_64
-            os: ubuntu-24.04
+            os: ubuntu-latest
           - name: linux-aarch64
             os: ubuntu-24.04-arm
           - name: macos-aarch64
-            os: macOS-14
+            os: macos-latest
           - name: macos-x86_64
-            os: macOS-13
+            os: macos-15-intel
           - name: windows-x86_64
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            ~/.cargo/bin/cargo-pgrx
-          key: cargo-pgrx-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml') }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}
-          cache-on-failure: true
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall' }
+      - name: Read pgrx version
+        id: pgrx-version
+        run: echo "value=$(just print-pgrx-version)" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ steps.pgrx-version.outputs.value }}
+          cache-on-failure: true
+          cache-bin: false
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-pgrx@${{ steps.pgrx-version.outputs.value }}
       - uses: actions/cache@v5
         with:
           path: |
             ~/.pgrx/config.toml
             ~/.pgrx/${{ matrix.pg }}.*
-          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ hashFiles('Cargo.toml') }}
+          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ steps.pgrx-version.outputs.value }}-${{ hashFiles('Cargo.toml') }}
           restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
       - if: runner.os == 'Linux'
         name: Configure PGDG apt repository
@@ -238,7 +168,7 @@ jobs:
   # This job checks if any of the previous jobs failed or were canceled.
   # This approach also allows some jobs to be skipped if they are not needed.
   ci-passed:
-    needs: [ test-pr, test, bundle ]
+    needs: [ test, bundle ]
     if: always()
     runs-on: ubuntu-latest
     steps:
