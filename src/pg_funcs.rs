@@ -635,17 +635,19 @@ mod tests {
     #[pg_test]
     fn test_pt_asmlt() {
         Spi::run(
-            "CREATE TEMP TABLE pt_asmlt_test (
-                id bigint,
-                geom point,
-                name text,
-                rank integer
-            )",
+            "
+CREATE TEMP TABLE pt_asmlt_test (
+    id bigint,
+    geom point,
+    name text,
+    rank integer
+)",
         )
         .unwrap();
         Spi::run(
-            "INSERT INTO pt_asmlt_test (id, geom, name, rank)
-             VALUES (1, point(10, 20), 'one', 7), (2, point(30, 40), 'two', 9)",
+            "
+INSERT INTO pt_asmlt_test (id, geom, name, rank)
+VALUES (1, point(10, 20), 'one', 7), (2, point(30, 40), 'two', 9)",
         )
         .unwrap();
 
