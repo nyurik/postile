@@ -30,13 +30,13 @@ jobs:
         pg: ${{ fromJSON((github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full_matrix)) && '[18]' || '[13,14,15,16,17,18]') }}
         target:
           - name: linux-x86_64
-            os: ubuntu-24.04
+            os: ubuntu-latest
           - name: linux-aarch64
             os: ubuntu-24.04-arm
           - name: macos-aarch64
-            os: macOS-14
+            os: macos-latest
           - name: macos-x86_64
-            os: macOS-13
+            os: macos-15-intel
           - name: windows-x86_64
             os: windows-latest
     steps:

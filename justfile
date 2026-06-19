@@ -16,8 +16,12 @@ supported_pg_versions := 'pg13 pg14 pg15 pg16 pg17 pg18'
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
 # Use `just env-info` to see the current values of RUSTFLAGS and RUSTDOCFLAGS
 ci_mode := if env('CI', '') != '' {'1'} else {''}
-export RUSTFLAGS := env('RUSTFLAGS', if ci_mode == '1' {'-D warnings'} else {''})
-export RUSTDOCFLAGS := env('RUSTDOCFLAGS', if ci_mode == '1' {'-D warnings'} else {''})
+ci_rustflags := if ci_mode == '1' {'-D warnings'} else {''}
+# RUSTFLAGS from the environment overrides .cargo/config.toml, so keep the
+# macOS extension linker flag when CI enables warnings-as-errors.
+macos_rustflags := if os() == 'macos' {'-C link-arg=-Wl,-undefined,dynamic_lookup'} else {''}
+default_rustflags := if ci_rustflags == '' {macos_rustflags} else if macos_rustflags == '' {ci_rustflags} else {ci_rustflags + ' ' + macos_rustflags}
+export RUSTFLAGS := env('RUSTFLAGS', default_rustflags)
 export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'})
 
 @_default:
