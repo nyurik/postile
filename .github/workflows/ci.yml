@@ -22,7 +22,6 @@ defaults:
 jobs:
   test:
     name: ${{ matrix.target.name }} pg${{ matrix.pg }}
-    if: github.event_name != 'release'
     runs-on: ${{ matrix.target.os }}
     strategy:
       fail-fast: false
@@ -43,24 +42,31 @@ jobs:
       - uses: actions/checkout@v7
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-binstall' }
-      - name: Read pgrx version
-        id: pgrx-version
-        run: echo "value=$(just print-pgrx-version)" >> "$GITHUB_OUTPUT"
+      - name: Set workflow variables
+        id: variables
+        run: |
+          pgrx_version="$(just print-pgrx-version)"
+          echo "pgrx_version=${pgrx_version}" >> "$GITHUB_OUTPUT"
+          echo "pg_feature=pg${{ matrix.pg }}" >> "$GITHUB_OUTPUT"
+          echo "cache_key=${{ matrix.target.name }}-pg${{ matrix.pg }}-${pgrx_version}" >> "$GITHUB_OUTPUT"
+          echo "run_ci_extras=${{ matrix.target.name == 'linux-x86_64' && matrix.pg == 18 }}" >> "$GITHUB_OUTPUT"
+          echo "should_package=${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'release' && github.event.action == 'published') }}" >> "$GITHUB_OUTPUT"
+          echo "should_upload_package=${{ (github.event_name == 'release' && github.event.action == 'published') || (matrix.target.name == 'linux-x86_64' && github.event_name == 'push' && github.ref == 'refs/heads/main') }}" >> "$GITHUB_OUTPUT"
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ steps.pgrx-version.outputs.value }}
+          key: ${{ steps.variables.outputs.cache_key }}
           cache-on-failure: true
           cache-bin: false
       - uses: taiki-e/cache-cargo-install-action@v3
         with:
-          tool: cargo-pgrx@${{ steps.pgrx-version.outputs.value }}
+          tool: cargo-pgrx@${{ steps.variables.outputs.pgrx_version }}
       - uses: actions/cache@v5
         with:
           path: |
             ~/.pgrx/config.toml
             ~/.pgrx/${{ matrix.pg }}.*
-          key: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-${{ steps.pgrx-version.outputs.value }}-${{ hashFiles('Cargo.toml') }}
-          restore-keys: pgrx-${{ matrix.target.name }}-pg${{ matrix.pg }}-
+          key: pgrx-${{ steps.variables.outputs.cache_key }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: pgrx-${{ steps.variables.outputs.cache_key }}-
       - if: runner.os == 'Linux'
         name: Configure PGDG apt repository
         run: |
@@ -77,7 +83,7 @@ jobs:
             build-essential clang libclang-dev libreadline-dev zlib1g-dev flex bison
             libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
             postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
-          version: ${{ matrix.target.name }}-pg${{ matrix.pg }}-v1
+          version: ${{ steps.variables.outputs.cache_key }}-v1
           execute_install_scripts: true
       - if: runner.os == 'Linux'
         name: Set Linux pg_config path
@@ -101,36 +107,36 @@ jobs:
         name: Select pgrx-managed PostgreSQL (Windows)
         run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
       - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
-      - run: just init-pg pg${{ matrix.pg }} "$PG_CONFIG_PATH"
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
-        run: just ci-lint pg${{ matrix.pg }}
-      - run: just test pg${{ matrix.pg }}
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+      - run: just init-pg ${{ steps.variables.outputs.pg_feature }} "$PG_CONFIG_PATH"
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        run: just ci-lint ${{ steps.variables.outputs.pg_feature }}
+      - run: just test ${{ steps.variables.outputs.pg_feature }}
+      - if: steps.variables.outputs.run_ci_extras == 'true'
         uses: taiki-e/install-action@v2
         with: { tool: cargo-llvm-cov }
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
-        run: just ci-coverage pg${{ matrix.pg }}
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        run: just ci-coverage ${{ steps.variables.outputs.pg_feature }}
+      - if: steps.variables.outputs.run_ci_extras == 'true'
         name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/llvm-cov/lcov.info
-      - if: matrix.target.name == 'linux-x86_64' && matrix.pg == 18
+      - if: steps.variables.outputs.run_ci_extras == 'true'
         run: just assert-git-is-clean
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: just package pg${{ matrix.pg }}
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - if: steps.variables.outputs.should_package == 'true'
+        run: just package ${{ steps.variables.outputs.pg_feature }}
+      - if: steps.variables.outputs.should_upload_package == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.target.name }}-pg${{ matrix.pg }}
-          path: target/release/postile-pg${{ matrix.pg }}/
+          path: target/release/postile-pg${{ matrix.pg }}.tar.gz
           if-no-files-found: error
 
   bundle:
     name: Bundle ${{ matrix.target }}
     needs: [ test ]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'release' && github.event.action == 'published'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -149,14 +155,15 @@ jobs:
           set -euo pipefail
           for pg in 13 14 15 16 17 18; do
             src="target/release/packages/package-${{ matrix.target }}-pg${pg}"
+            archive="${src}/postile-pg${pg}.tar.gz"
             dst="target/release/postile-pg${pg}"
-            if [ ! -d "$src" ]; then
-              echo "Missing package artifact: $src" >&2
+            if [ ! -f "$archive" ]; then
+              echo "Missing package artifact: $archive" >&2
               exit 1
             fi
             rm -rf "$dst"
             mkdir -p "$dst"
-            cp -a "$src/." "$dst/"
+            tar -xzf "$archive" -C "$dst"
           done
       - run: just bundle-platform ${{ matrix.target }}
       - uses: actions/upload-artifact@v7
@@ -177,34 +184,19 @@ jobs:
       - if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
 
-  # Upload the already-tested main-branch package artifacts to a published GitHub Release.
+  # Upload the bundles built by this release workflow to the published GitHub Release.
   upload-release:
     name: Upload to Release
+    needs: [ bundle ]
     if: github.event_name == 'release' && github.event.action == 'published'
     runs-on: ubuntu-latest
     permissions: { actions: read, contents: write }
     steps:
       - uses: actions/checkout@v7
-      - name: Download bundled artifacts from matching main CI run
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          set -euo pipefail
-          sha="$(git rev-parse HEAD)"
-          run_id="$(gh run list \
-            --workflow "$GITHUB_WORKFLOW" \
-            --branch main \
-            --commit "$sha" \
-            --event push \
-            --status success \
-            --json databaseId \
-            --jq '.[0].databaseId')"
-          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
-            echo "No successful main CI run with release bundles found for $TAG ($sha)." >&2
-            exit 1
-          fi
-          gh run download "$run_id" --pattern 'release-bundle-*' --dir release
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-bundle-*
+          path: release
       - name: Upload packages to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
