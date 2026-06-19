@@ -53,9 +53,14 @@ jobs:
           owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           image="ghcr.io/${owner}/postgis-postile"
           postgis_tag="$(just maybe-postgis-tag pg${{ matrix.pg }})"
+          is_publish_event=false
           publish_image=false
 
-          if [[ "${{ github.event_name }}" != 'pull_request' && "${{ matrix.target.name }}" == 'linux-x86_64' && -n "$postgis_tag" ]]; then
+          if [[ "${{ github.event_name }}" == 'push' && "${{ github.ref }}" == 'refs/heads/main' ]] || [[ "${{ github.event_name }}" == 'release' ]]; then
+            is_publish_event=true
+          fi
+
+          if [[ "$is_publish_event" == 'true' && "${{ matrix.target.name }}" == 'linux-x86_64' && -n "$postgis_tag" ]]; then
             publish_image=true
           fi
 

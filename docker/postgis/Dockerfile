@@ -35,3 +35,5 @@ RUN set -eux; \
     test -f "$(pg_config --pkglibdir)/postile.so"; \
     test -f "$(pg_config --sharedir)/extension/postile.control"; \
     ls "$(pg_config --sharedir)"/extension/postile--*.sql >/dev/null
+
+USER postgres
