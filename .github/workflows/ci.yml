@@ -5,58 +5,158 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  release:
+    types: [ published ]
   workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Run the full OS/PostgreSQL matrix
+        required: false
+        type: boolean
+        default: true
 
 defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Test
-    runs-on: ubuntu-latest
+    name: ${{ matrix.target.name }} pg${{ matrix.pg }}
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ${{ matrix.target.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: ${{ fromJSON((github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.full_matrix)) && '[18]' || '[13,14,15,16,17,18]') }}
+        target:
+          - name: linux-x86_64
+            os: ubuntu-latest
+          - name: linux-aarch64
+            os: ubuntu-24.04-arm
+          - name: macos-aarch64
+            os: macos-latest
+          - name: macos-x86_64
+            os: macos-15-intel
+          - name: windows-x86_64
+            os: windows-latest
     steps:
-      - uses: actions/checkout@v5
-      - if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-        uses: Swatinem/rust-cache@v2
-        with: { key: 'v0.16' }
+      - uses: actions/checkout@v7
       - uses: taiki-e/install-action@v2
-        with: { tool: 'just,cargo-binstall,cargo-llvm-cov' }
-      - uses: awalsh128/cache-apt-pkgs-action@v1
+        with: { tool: 'just,cargo-binstall' }
+      - name: Set workflow variables
+        id: variables
+        run: |
+          pgrx_version="$(just get-pgrx-version)"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/postgis-postile"
+          postgis_tag="$(just maybe-postgis-tag pg${{ matrix.pg }})"
+          is_publish_event=false
+          publish_image=false
+
+          if [[ "${{ github.event_name }}" == 'push' && "${{ github.ref }}" == 'refs/heads/main' ]] || [[ "${{ github.event_name }}" == 'release' ]]; then
+            is_publish_event=true
+          fi
+
+          if [[ "$is_publish_event" == 'true' && "${{ matrix.target.name }}" == 'linux-x86_64' && -n "$postgis_tag" ]]; then
+            publish_image=true
+          fi
+
+          echo "pgrx_version=${pgrx_version}" >> "$GITHUB_OUTPUT"
+          echo "pg_feature=pg${{ matrix.pg }}" >> "$GITHUB_OUTPUT"
+          echo "cache_key=${{ matrix.target.name }}-pg${{ matrix.pg }}-${pgrx_version}" >> "$GITHUB_OUTPUT"
+          echo "run_ci_extras=${{ matrix.target.name == 'linux-x86_64' && matrix.pg == 18 }}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image}:${postgis_tag}" >> "$GITHUB_OUTPUT"
+          echo "postgis_tag=${postgis_tag}" >> "$GITHUB_OUTPUT"
+          echo "publish_image=${publish_image}" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@v2
         with:
-          packages: build-essential libreadline-dev zlib1g-dev flex bison libxml2-dev libxslt-dev libssl-dev libxml2-utils xsltproc ccache pkg-config
-          version: 1.0
-      - run: just init
-      - run: just ci-test
-      - run: just ci-coverage
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+          key: ${{ steps.variables.outputs.cache_key }}
+          cache-on-failure: true
+          cache-bin: false
+      - uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-pgrx@${{ steps.variables.outputs.pgrx_version }}
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.pgrx/config.toml
+            ~/.pgrx/${{ matrix.pg }}.*
+          key: pgrx-${{ steps.variables.outputs.cache_key }}-${{ hashFiles('Cargo.toml') }}
+          restore-keys: pgrx-${{ steps.variables.outputs.cache_key }}-
+      - if: runner.os == 'Linux'
+        name: Configure PGDG apt repository
+        run: |
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+      - if: runner.os == 'Linux'
+        name: Install PostgreSQL and build dependencies (Linux)
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: >-
+            build-essential clang libclang-dev pkg-config
+            postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
+          version: ${{ steps.variables.outputs.cache_key }}-v1
+          execute_install_scripts: true
+      - if: runner.os == 'Linux'
+        name: Set Linux pg_config path
+        run: |
+          pg_config_path="/usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config"
+          echo "PG_CONFIG_PATH=${pg_config_path}" >> "$GITHUB_ENV"
+          sudo chmod a+rwx "$("${pg_config_path}" --pkglibdir)" "$("${pg_config_path}" --sharedir)/extension"
+      - if: runner.os == 'macOS'
+        name: Install PostgreSQL and build dependencies (macOS)
+        run: |
+          HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install icu4c pkg-config
+          echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig" >> "$GITHUB_ENV"
+          if HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install postgresql@${{ matrix.pg }}; then
+            echo "$(brew --prefix postgresql@${{ matrix.pg }})/bin" >> "$GITHUB_PATH"
+            echo "PG_CONFIG_PATH=$(brew --prefix postgresql@${{ matrix.pg }})/bin/pg_config" >> "$GITHUB_ENV"
+          else
+            echo "Homebrew postgresql@${{ matrix.pg }} is unavailable; pgrx will download PostgreSQL."
+            echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
+          fi
+      - if: runner.os == 'Windows'
+        name: Select pgrx-managed PostgreSQL (Windows)
+        run: echo "PG_CONFIG_PATH=" >> "$GITHUB_ENV"
+      - run: rm -rf "$HOME/.pgrx/data-${{ matrix.pg }}"
+      - run: just init-pg ${{ steps.variables.outputs.pg_feature }} "$PG_CONFIG_PATH"
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        run: just ci-lint ${{ steps.variables.outputs.pg_feature }}
+      - run: just test ${{ steps.variables.outputs.pg_feature }}
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        uses: taiki-e/install-action@v2
+        with: { tool: cargo-llvm-cov }
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        run: just ci-coverage ${{ steps.variables.outputs.pg_feature }}
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: target/llvm-cov/codecov.info
+          files: target/llvm-cov/lcov.info
+      - if: steps.variables.outputs.run_ci_extras == 'true'
+        run: just assert-git-is-clean
+      - if: steps.variables.outputs.publish_image == 'true'
+        name: Build image
+        run: just postgis-image "${{ steps.variables.outputs.pg_feature }}" "${{ steps.variables.outputs.postgis_tag }}" "${{ steps.variables.outputs.image_tag }}"
+      - if: steps.variables.outputs.publish_image == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-#  build:
-#    name: Build ${{ matrix.target }}
-#    runs-on: ${{ matrix.os }}
-#    strategy:
-#      fail-fast: false
-#      matrix:
-#        include:
-#          - target: aarch64-apple-darwin
-#            os: macOS-14
-#          - target: x86_64-apple-darwin
-#            os: macOS-12
-#          - target: x86_64-pc-windows-msvc
-#            os: windows-latest
-#          - target: x86_64-unknown-linux-gnu
-#            os: ubuntu-latest
-#    steps:
-#      - uses: taiki-e/install-action@v2
-#        with:
-#          tool: just
-#      - uses: actions/checkout@v5
-#      - if: github.event_name != 'release' && github.event_name != 'workflow_dispatch'
-#        uses: Swatinem/rust-cache@v2
+      - if: steps.variables.outputs.publish_image == 'true'
+        run: bash docker/postgis/smoke-test.sh "${{ steps.variables.outputs.image_tag }}"
+      - if: steps.variables.outputs.publish_image == 'true'
+        run: docker push "${{ steps.variables.outputs.image_tag }}"
 
   # This job checks if any of the previous jobs failed or were canceled.
   # This approach also allows some jobs to be skipped if they are not needed.
@@ -69,37 +169,3 @@ jobs:
         run: echo "${{ toJSON(needs) }}"
       - if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: exit 1
-
-#  # Release unpublished packages or create a PR with changes
-#  release-plz:
-#    needs: [ ci-passed ]
-#    if: |
-#      always()
-#      && needs.ci-passed.result == 'success'
-#      && github.event_name == 'push'
-#      && github.ref == 'refs/heads/main'
-#      && github.repository_owner == 'nyurik'
-#    runs-on: ubuntu-latest
-#    permissions:
-#      contents: write
-#      id-token: write
-#      pull-requests: write
-#    concurrency:
-#      group: release-plz-${{ github.ref }}
-#      cancel-in-progress: false
-#    steps:
-#      - uses: actions/checkout@v5
-#        with: { fetch-depth: 0 }
-#      - uses: dtolnay/rust-toolchain@stable
-#      - name: Publish to crates.io if crate's version is newer
-#        uses: release-plz/action@v0.5
-#        id: release
-#        with: { command: release }
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-#      - if: ${{ steps.release.outputs.releases_created == 'false' }}
-#        name: If version is the same, create a PR proposing new version and changelog for the next release
-#        uses: release-plz/action@v0.5
-#        with: { command: release-pr }
-#        env:
-#          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
