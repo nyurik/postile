@@ -591,9 +591,12 @@ dependencies = [
 
 [[package]]
 name = "dup-indexer"
-version = "0.4.5"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c882fa8d131819ebc485e3c98abf54c8324b526345ea0fa5031b7fa7a27c9069"
+checksum = "1a253a963acd43cb7ace3e7afe09bb4787b007e412b8158aa1f870a275f5a2e3"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "earcut"
@@ -694,9 +697,9 @@ checksum = "4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7"
 
 [[package]]
 name = "fast-mvt"
-version = "0.3.2"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "075da97a9d841b90a396a2c5b26808fce818ca21989bc8398d2d2122c8eae197"
+checksum = "42da86ae212cff4e913e2131812069cb9172a1de185804357b6f50afc9a174f9"
 dependencies = [
  "buffa",
  "dup-indexer",
@@ -757,6 +760,12 @@ name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
+name = "foldhash"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
@@ -925,7 +934,7 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
- "foldhash",
+ "foldhash 0.1.5",
  "serde",
 ]
 
@@ -1298,9 +1307,9 @@ dependencies = [
 
 [[package]]
 name = "mlt-core"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad02aa16bc89139da2c08ccd8a63c261990f8dd4688e9f1bf81291965ca8293"
+checksum = "33bc4081ca01c3564ebb2ab150702bc2570edd5ccf6f30b18b8ac594ab9ac5fb"
 dependencies = [
  "bitvec",
  "bytemuck",
