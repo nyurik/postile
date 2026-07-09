@@ -12,12 +12,11 @@ default_pg_ver := 'pg18'
 # PostgreSQL versions supported by the pgrx version in Cargo.toml
 supported_pg_versions := 'pg13 pg14 pg15 pg16 pg17 pg18'
 
-# If running in CI, treat warnings as errors for cargo commands that compile code.
+# if running in CI, treat warnings as errors by setting CARGO_BUILD_WARNINGS to 'deny' unless it is already set
 # Use `CI=true just ci-test` to run the same tests as in GitHub CI.
-# Use `just env-info` to see the current CI command flags.
+# Use `just env-info` to see the current value of CARGO_BUILD_WARNINGS
 ci_mode := if env('CI', '') != '' {'1'} else {''}
-cargo_deny_warnings := if ci_mode == '1' {'--config ' + quote('build.rustflags=["-Dwarnings"]')} else {''}
-clippy_deny_warnings := if ci_mode == '1' {'-- -D warnings'} else {''}
+export CARGO_BUILD_WARNINGS := env('CARGO_BUILD_WARNINGS', if ci_mode == '1' {'deny'} else {'warn'})
 export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'})
 
 @_default:
@@ -30,11 +29,11 @@ bench:
 
 # Build the project
 build:
-    cargo {{cargo_deny_warnings}} build --workspace --all-targets
+    cargo build --workspace --all-targets
 
 # Quick compile without building a binary for a PG version
 check pg_ver=default_pg_ver:
-    cargo {{cargo_deny_warnings}} check --workspace --all-targets --no-default-features --features {{pg_ver}}
+    cargo check --workspace --all-targets --no-default-features --features {{pg_ver}}
 
 # Generate LCOV coverage report for CI to upload to codecov.io
 ci-coverage pg_ver=default_pg_ver: env-info
@@ -51,7 +50,7 @@ clean:
 
 # Run cargo clippy for a PG version
 clippy pg_ver=default_pg_ver:
-    cargo clippy --workspace --all-targets --no-default-features --features {{pg_ver}} {{clippy_deny_warnings}}
+    cargo clippy --workspace --all-targets --no-default-features --features {{pg_ver}}
 
 # Use psql to connect to a database
 connect: install-pgrx
@@ -62,9 +61,9 @@ coverage:  (_coverage default_pg_ver '--open')
 
 # Clean, collect, and aggregate coverage using the requested report arguments
 _coverage pg_ver=default_pg_ver *report_args:  (cargo-install 'cargo-llvm-cov')
-    cargo {{cargo_deny_warnings}} llvm-cov clean --workspace
-    cargo {{cargo_deny_warnings}} llvm-cov --no-report --workspace --all-targets --no-default-features --features {{pg_ver}}
-    cargo {{cargo_deny_warnings}} llvm-cov report --include-build-script {{report_args}}
+    cargo llvm-cov clean --workspace
+    cargo llvm-cov --no-report --workspace --all-targets --no-default-features --features {{pg_ver}}
+    cargo llvm-cov report --include-build-script {{report_args}}
 
 # Print environment info
 env-info:
@@ -74,8 +73,7 @@ env-info:
     rustc --version
     cargo --version
     rustup --version
-    @echo "cargo_deny_warnings='{{cargo_deny_warnings}}'"
-    @echo "clippy_deny_warnings='{{clippy_deny_warnings}}'"
+    @echo "CARGO_BUILD_WARNINGS='$CARGO_BUILD_WARNINGS'"
     @echo "RUST_BACKTRACE='$RUST_BACKTRACE'"
 
 # Reformat all code `cargo fmt`. If nightly is available, use it for better results
@@ -299,6 +297,7 @@ assert-git-is-clean:
 cargo-install $COMMAND $INSTALL_CMD='' *args='':
     #!/usr/bin/env bash
     set -euo pipefail
+    unset CARGO_BUILD_WARNINGS
     if ! command -v $COMMAND > /dev/null; then
         echo "$COMMAND could not be found. Installing..."
         if ! command -v cargo-binstall > /dev/null; then
