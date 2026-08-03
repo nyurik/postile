@@ -46,7 +46,7 @@ jobs:
             os: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@v2.85.5
         with: { tool: 'just,cargo-binstall' }
       - name: Set workflow variables
         id: variables
@@ -79,10 +79,10 @@ jobs:
           key: ${{ steps.variables.outputs.cache_key }}
           cache-on-failure: true
           cache-bin: false
-      - uses: taiki-e/cache-cargo-install-action@v3
+      - uses: taiki-e/cache-cargo-install-action@v3.0.7
         with:
           tool: cargo-pgrx@${{ steps.variables.outputs.pgrx_version }}
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.pgrx/config.toml
@@ -131,7 +131,7 @@ jobs:
         run: just ci-lint ${{ steps.variables.outputs.pg_feature }}
       - run: just test ${{ steps.variables.outputs.pg_feature }}
       - if: steps.variables.outputs.run_ci_extras == 'true'
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@v2.85.5
         with: { tool: cargo-llvm-cov }
       - if: steps.variables.outputs.run_ci_extras == 'true'
         run: just ci-coverage ${{ steps.variables.outputs.pg_feature }}
