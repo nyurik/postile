@@ -24,17 +24,17 @@ pg_test = []
 pg_bench = ["dep:pgrx-bench"]
 
 [dependencies]
-brotli = ">5, <9"
+brotli = ">5, <10"
 flate2 = "1"
 mlt-core = "0.12.0"
-pgrx = "=0.18.1"
+pgrx = "=0.19.2"
 
 [dependencies.pgrx-bench]
-version = "=0.18.1"
+version = "=0.19.2"
 optional = true
 
 [dev-dependencies]
-pgrx-tests = "=0.18.1"
+pgrx-tests = "=0.19.2"
 
 [profile.dev]
 panic = "unwind"
